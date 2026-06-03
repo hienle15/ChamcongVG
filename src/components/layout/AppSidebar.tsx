@@ -20,6 +20,8 @@ interface AppSidebarProps {
   areaTree: AreaNode[]
   expandedAreas: Set<string>
   toggleAreaExpand: (code: string) => void
+  selectedExportDepts?: string[]
+  setSelectedExportDepts?: React.Dispatch<React.SetStateAction<string[]>>
 }
 
 const AppSidebar: React.FC<AppSidebarProps> = ({
@@ -34,6 +36,8 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
   areaTree,
   expandedAreas,
   toggleAreaExpand,
+  selectedExportDepts = [],
+  setSelectedExportDepts,
 }) => {
   return (
     <aside style={{ ...s.sidebar, width: sidebarOpen ? 240 : 64 }}>
@@ -128,6 +132,13 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
               {areaTree.map((areaNode) => {
                 const isAreaExpanded = expandedAreas.has(areaNode.area.areaCode)
                 const hasActiveChild = areaNode.departments.some(d => d.departmentCode === selectedDeptCode)
+
+                // Calculate selection state for export
+                const deptCodes = areaNode.departments.map(d => d.departmentCode)
+                const selectedCount = deptCodes.filter(c => selectedExportDepts.includes(c)).length
+                const isAllSelected = deptCodes.length > 0 && selectedCount === deptCodes.length
+                const isPartial = selectedCount > 0 && selectedCount < deptCodes.length
+
                 return (
                   <div key={areaNode.area.areaCode} style={{ marginBottom: 4 }}>
                     {/* Area header */}
@@ -166,25 +177,67 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                         chevron_right
                       </span>
 
-                      {/* Area icon box */}
-                      <span style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 6,
-                        background: hasActiveChild ? 'rgba(255,224,130,0.25)' : 'rgba(255,255,255,0.1)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}>
-                        <span
-                          className="material-symbols-outlined"
-                          style={{ fontSize: 12, color: hasActiveChild ? '#ffe082' : 'rgba(255,255,255,0.55)' }}
+                      {/* Custom Checkbox for Area export selection */}
+                      {setSelectedExportDepts && (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (isAllSelected) {
+                              // Unselect all in this area
+                              setSelectedExportDepts(prev => prev.filter(c => !deptCodes.includes(c)))
+                            } else {
+                              // Select all in this area
+                              setSelectedExportDepts(prev => {
+                                const set = new Set([...prev, ...deptCodes])
+                                return Array.from(set)
+                              })
+                            }
+                          }}
+                          style={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: 4,
+                            border: (isAllSelected || isPartial) ? 'none' : '1.5px solid rgba(255,255,255,0.4)',
+                            background: (isAllSelected || isPartial) ? '#ffe082' : 'rgba(255,255,255,0.05)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s',
+                            marginRight: 4
+                          }}
                         >
-                          domain
+                          {isAllSelected && (
+                            <span className="material-symbols-outlined" style={{ fontSize: 13, color: '#0f172a', fontWeight: 900 }}>check</span>
+                          )}
+                          {isPartial && (
+                            <span className="material-symbols-outlined" style={{ fontSize: 13, color: '#0f172a', fontWeight: 900 }}>remove</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Area icon box */}
+                      {!setSelectedExportDepts && (
+                        <span style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 6,
+                          background: hasActiveChild ? 'rgba(255,224,130,0.25)' : 'rgba(255,255,255,0.1)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          transition: 'background 0.15s',
+                        }}>
+                          <span
+                            className="material-symbols-outlined"
+                            style={{ fontSize: 12, color: hasActiveChild ? '#ffe082' : 'rgba(255,255,255,0.55)' }}
+                          >
+                            domain
+                          </span>
                         </span>
-                      </span>
+                      )}
 
                       {/* Area name */}
                       <span style={{
@@ -235,8 +288,6 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                           return (
                             <div
                               key={dept.departmentCode}
-                              onClick={() => handleSelectDept(dept.departmentCode)}
-                              title={dept.departmentName}
                               style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -254,18 +305,55 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                                 boxShadow: isSelected ? 'inset 3px 0 0 #ffe082' : 'none',
                               }}
                             >
-                              {/* Accent dot */}
-                              <span style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: isSelected ? '#ffe082' : 'rgba(255,255,255,0.25)',
-                                flexShrink: 0,
-                                transition: 'background 0.15s',
-                              }} />
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {dept.departmentName}
-                              </span>
+                              {/* Custom Checkbox for export selection */}
+                              {setSelectedExportDepts && (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const isChecked = selectedExportDepts.includes(dept.departmentCode)
+                                    if (isChecked) setSelectedExportDepts(prev => prev.filter(c => c !== dept.departmentCode))
+                                    else setSelectedExportDepts(prev => [...prev, dept.departmentCode])
+                                  }}
+                                  style={{
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 4,
+                                    border: selectedExportDepts.includes(dept.departmentCode) ? 'none' : '1.5px solid rgba(255,255,255,0.4)',
+                                    background: selectedExportDepts.includes(dept.departmentCode) ? '#ffe082' : 'rgba(255,255,255,0.05)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  {selectedExportDepts.includes(dept.departmentCode) && (
+                                    <span className="material-symbols-outlined" style={{ fontSize: 13, color: '#0f172a', fontWeight: 900 }}>check</span>
+                                  )}
+                                </div>
+                              )}
+
+                              <div
+                                onClick={() => handleSelectDept(dept.departmentCode)}
+                                title={dept.departmentName}
+                                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}
+                              >
+                                {/* Accent dot */}
+                                {!setSelectedExportDepts && (
+                                  <span style={{
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: '50%',
+                                    background: isSelected ? '#ffe082' : 'rgba(255,255,255,0.25)',
+                                    flexShrink: 0,
+                                    transition: 'background 0.15s',
+                                  }} />
+                                )}
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {dept.departmentName}
+                                </span>
+                              </div>
                             </div>
                           )
                         })}

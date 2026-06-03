@@ -87,6 +87,7 @@ const AttendancePage = () => {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
   const [isExportingMonthly, setIsExportingMonthly] = useState(false)
+  const [selectedExportDepts, setSelectedExportDepts] = useState<string[]>([])
 
   /* Department tree */
   const [deptTreeOpen, setDeptTreeOpen] = useState(true)
@@ -214,23 +215,44 @@ const AttendancePage = () => {
     try {
       showToast('Đang tải dữ liệu...', 'ok')
 
-      // Fetch all records for the month (large pageSize)
       let allRows: DailySummaryItem[] = []
-      const queryParams: DailySummaryParams = {
-        page: 1,
-        pageSize: 500,
-        fromDate,
-        toDate,
-        ...(filterDraft.departmentCode ? { departmentCode: filterDraft.departmentCode } : {}),
-        ...(filterDraft.employeeCode ? { employeeCode: filterDraft.employeeCode } : {})
-      }
+      
+      if (selectedExportDepts.length > 0) {
+        for (const deptCode of selectedExportDepts) {
+          const queryParams: DailySummaryParams = {
+            page: 1,
+            pageSize: 500,
+            fromDate,
+            toDate,
+            departmentCode: deptCode
+          }
+          const firstPage = await attendanceApi.getDailySummary(queryParams)
+          let deptRows = firstPage.items ?? []
+          if (firstPage.totalPages > 1) {
+            for (let p = 2; p <= firstPage.totalPages; p++) {
+              const res = await attendanceApi.getDailySummary({ ...queryParams, page: p })
+              deptRows = deptRows.concat(res.items ?? [])
+            }
+          }
+          allRows = allRows.concat(deptRows)
+        }
+      } else {
+        const queryParams: DailySummaryParams = {
+          page: 1,
+          pageSize: 500,
+          fromDate,
+          toDate,
+          ...(filterDraft.departmentCode ? { departmentCode: filterDraft.departmentCode } : {}),
+          ...(filterDraft.employeeCode ? { employeeCode: filterDraft.employeeCode } : {})
+        }
 
-      const firstPage = await attendanceApi.getDailySummary(queryParams)
-      allRows = firstPage.items ?? []
-      if (firstPage.totalPages > 1) {
-        for (let p = 2; p <= firstPage.totalPages; p++) {
-          const res = await attendanceApi.getDailySummary({ ...queryParams, page: p })
-          allRows = allRows.concat(res.items ?? [])
+        const firstPage = await attendanceApi.getDailySummary(queryParams)
+        allRows = firstPage.items ?? []
+        if (firstPage.totalPages > 1) {
+          for (let p = 2; p <= firstPage.totalPages; p++) {
+            const res = await attendanceApi.getDailySummary({ ...queryParams, page: p })
+            allRows = allRows.concat(res.items ?? [])
+          }
         }
       }
 
@@ -340,8 +362,65 @@ const AttendancePage = () => {
       ws.getRow(currentRow).height = 28
       currentRow++
 
-      // We'll write dept sections below
-      const deptSectionStartRow = currentRow
+      // ── Unified Column header rows (3 rows) ──
+      const staticCols = [1, 2, 3, 4, 5, colCongChinh, colTongCongChinh, colTangCa, colChuNhat, colTangCaChuNhat, colGhiChu]
+      const hdrFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND } }
+      const sunFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND_LIGHT } }
+
+      const writeHdrCell = (r: number, col: number, val: any, sun = false) => {
+        const cell = ws.getCell(r, col)
+        cell.value = val
+        cell.font = sun
+          ? { ...headerFont, color: { argb: 'FFCC0000' } }
+          : { ...headerFont, color: { argb: WHITE } }
+        cell.alignment = centerAlign()
+        cell.fill = sun ? sunFill : hdrFill
+        cell.border = headerBorders()
+      }
+
+      const r1 = currentRow
+      // Row 1: labels
+      ws.getRow(currentRow).height = 30
+      writeHdrCell(currentRow, 1, 'STT')
+      writeHdrCell(currentRow, 2, 'MÃ NHÂN VIÊN')
+      writeHdrCell(currentRow, 3, 'SỐ CCCD')
+      writeHdrCell(currentRow, 4, 'HỌ VÀ TÊN')
+      writeHdrCell(currentRow, 5, 'NGÀY VÀO LÀM')
+      ws.mergeCells(currentRow, dayStartCol, currentRow, dayEndCol)
+      writeHdrCell(currentRow, dayStartCol, 'Ngày Trong Tháng')
+      writeHdrCell(currentRow, colCongChinh, 'Công Chính')
+      writeHdrCell(currentRow, colTongCongChinh, 'Tổng Công Chính')
+      writeHdrCell(currentRow, colTangCa, 'Tăng Ca')
+      writeHdrCell(currentRow, colChuNhat, 'Chủ Nhật')
+      writeHdrCell(currentRow, colTangCaChuNhat, 'Tăng Ca Chủ Nhật')
+      writeHdrCell(currentRow, colGhiChu, 'Ghi Chú')
+      currentRow++
+
+      // Row 2: day numbers
+      ws.getRow(currentRow).height = 18
+      for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
+      for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, d)
+      currentRow++
+
+      // Row 3: day-of-week
+      ws.getRow(currentRow).height = 18
+      for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
+      for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, dayNames[d - 1], isSunday(d))
+      const hdrRow3Index = currentRow
+      currentRow++
+
+      // Merge static cols across all 3 header rows
+      for (const col of staticCols) {
+        ws.mergeCells(r1, col, hdrRow3Index, col)
+        const mc = ws.getCell(r1, col)
+        mc.alignment = centerAlign()
+        mc.fill = hdrFill
+        mc.border = headerBorders()
+      }
+
+      // Freeze top rows & first 5 cols
+      const frozenY = currentRow - 1
+      ws.views = [{ state: 'frozen', xSplit: 5, ySplit: frozenY, topLeftCell: `F${frozenY + 1}`, activeCell: 'A1' }]
 
       let globalStt = 0
 
@@ -355,67 +434,9 @@ const AttendancePage = () => {
         deptCell.font = { ...titleFont, size: 12, bold: true, color: { argb: BRAND } }
         deptCell.alignment = leftAlign()
         deptCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND_LIGHT } }
+        deptCell.border = allBorders()
         ws.getRow(currentRow).height = 20
         currentRow++
-
-        // ── Column header rows (3 rows): write all cells first, then merge static cols in 1 pass ──
-        const staticCols = [1, 2, 3, 4, 5, colCongChinh, colTongCongChinh, colTangCa, colChuNhat, colTangCaChuNhat, colGhiChu]
-        const hdrFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND } }
-        const sunFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND_LIGHT } }
-
-        const writeHdrCell = (r: number, col: number, val: any, sun = false) => {
-          const cell = ws.getCell(r, col)
-          cell.value = val
-          // White text on brand bg; red text on Sunday yellow bg
-          cell.font = sun
-            ? { ...headerFont, color: { argb: 'FFCC0000' } }
-            : { ...headerFont, color: { argb: WHITE } }
-          cell.alignment = centerAlign()
-          cell.fill = sun ? sunFill : hdrFill
-          cell.border = headerBorders()
-        }
-
-        const hdrRow1Index = currentRow
-
-        // Row 1: labels
-        ws.getRow(currentRow).height = 30
-        writeHdrCell(currentRow, 1, 'STT')
-        writeHdrCell(currentRow, 2, 'MÃ NHÂN VIÊN')
-        writeHdrCell(currentRow, 3, 'SỐ CCCD')
-        writeHdrCell(currentRow, 4, 'HỌ VÀ TÊN')
-        writeHdrCell(currentRow, 5, 'NGÀY VÀO LÀM')
-        ws.mergeCells(currentRow, dayStartCol, currentRow, dayEndCol)
-        writeHdrCell(currentRow, dayStartCol, 'Ngày Trong Tháng')
-        writeHdrCell(currentRow, colCongChinh, 'Công Chính')
-        writeHdrCell(currentRow, colTongCongChinh, 'Tổng Công Chính')
-        writeHdrCell(currentRow, colTangCa, 'Tăng Ca')
-        writeHdrCell(currentRow, colChuNhat, 'Chủ Nhật')
-        writeHdrCell(currentRow, colTangCaChuNhat, 'Tăng Ca Chủ Nhật')
-        writeHdrCell(currentRow, colGhiChu, 'Ghi Chú')
-        const r1 = currentRow
-        currentRow++
-
-        // Row 2: day numbers
-        ws.getRow(currentRow).height = 18
-        for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
-        for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, d)
-        currentRow++
-
-        // Row 3: day-of-week
-        ws.getRow(currentRow).height = 18
-        for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
-        for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, dayNames[d - 1], isSunday(d))
-        const hdrRow3Index = currentRow
-        currentRow++
-
-        // Merge static cols across all 3 header rows — ONE merge per column, no double-merge error
-        for (const col of staticCols) {
-          ws.mergeCells(r1, col, hdrRow3Index, col)
-          const mc = ws.getCell(r1, col)
-          mc.alignment = centerAlign()
-          mc.fill = hdrFill
-          mc.border = headerBorders()
-        }
 
         // ── Employee rows ──
         let deptTotalCong = 0
@@ -588,8 +609,6 @@ const AttendancePage = () => {
         currentRow++
       }
 
-      // Freeze top rows & first 5 cols
-      ws.views = [{ state: 'frozen', xSplit: 5, ySplit: deptSectionStartRow + 3, topLeftCell: `F${deptSectionStartRow + 4}`, activeCell: 'A1' }]
 
       const buffer = await workbook.xlsx.writeBuffer()
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
@@ -890,6 +909,8 @@ const AttendancePage = () => {
         areaTree={areaTree}
         expandedAreas={expandedAreas}
         toggleAreaExpand={toggleAreaExpand}
+        selectedExportDepts={selectedExportDepts}
+        setSelectedExportDepts={setSelectedExportDepts}
       />
 
       {/* ═══════════ MAIN ═══════════ */}
@@ -995,7 +1016,7 @@ const AttendancePage = () => {
               </div>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.textSub, marginBottom: 8 }}>
                 Tháng / Năm
               </label>
@@ -1018,6 +1039,41 @@ const AttendancePage = () => {
                 onFocus={e => e.target.style.borderColor = '#16a34a'}
                 onBlur={e => e.target.style.borderColor = C.border}
               />
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, fontWeight: 600, color: C.textSub, marginBottom: 8 }}>
+                <span>Phòng ban (có thể chọn nhiều)</span>
+                {selectedExportDepts.length > 0 && (
+                  <span 
+                    onClick={() => setSelectedExportDepts([])}
+                    style={{ fontSize: 12, color: '#3b82f6', cursor: 'pointer', fontWeight: 500 }}
+                  >
+                    Bỏ chọn tất cả
+                  </span>
+                )}
+              </label>
+              <div style={{
+                maxHeight: 180, overflowY: 'auto', border: `1.5px solid ${C.border}`, borderRadius: 8, padding: '4px 0', background: '#f8fafc'
+              }}>
+                {departments.map(d => (
+                  <label key={d.departmentCode} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <input
+                      type="checkbox"
+                      checked={selectedExportDepts.includes(d.departmentCode)}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedExportDepts(prev => [...prev, d.departmentCode])
+                        else setSelectedExportDepts(prev => prev.filter(c => c !== d.departmentCode))
+                      }}
+                      style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#16a34a' }}
+                    />
+                    <span style={{ fontSize: 14, color: C.textMain }}>{d.departmentName}</span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: C.textMuted, marginTop: 6, fontStyle: 'italic' }}>
+                * Để trống nếu muốn xuất tất cả phòng ban
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>

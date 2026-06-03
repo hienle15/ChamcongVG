@@ -26,6 +26,12 @@ async function request<T>(
   })
 
   if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('accessToken')
+      localStorage.removeItem('user')
+      window.location.href = '/login'
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+    }
     let errMsg = `HTTP ${res.status}`
     try {
       const err = await res.json()

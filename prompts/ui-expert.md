@@ -7,7 +7,7 @@ Nhiệm vụ của bạn là xây dựng và hiện đại hóa giao diện hệ
 2. THẨM MỸ: Phong cách Clean & Minimalist, hiện đại, chuyên nghiệp, phù hợp với môi trường Portal doanh nghiệp.
 3. MÀU SẮC: 
    - Tuyệt đối KHÔNG sử dụng màu tím.
-   - Ưu tiên tông màu chủ đạo: Forest Green (#059669) hoặc Deep Blue (#0284C7).
+- Ưu tiên tông màu chủ đạo: Forest Green (#059669) hoặc Deep Blue (#0284C7).
 4. CHẾ ĐỘ: Chỉ thiết kế Light Mode (giao diện sáng).
 5. KỸ THUẬT: 
    - Sử dụng React, Tailwind CSS, TypeScript.

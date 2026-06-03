@@ -93,26 +93,7 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
             />
           </div>
         </div>
-        <div>
-          <label style={s.filterLabel}>Phòng ban</label>
-          <div style={{ ...s.filterInputWrap, border: 'none', background: 'transparent', padding: 0 }}>
-            <VGSelectSearch
-              value={filterDraft.departmentCode}
-              onChange={(v) => setFilterDraft({ ...filterDraft, departmentCode: v ? String(v.value) : '' })}
-              placeholder="Tất cả phòng ban"
-              loadOptions={async (kw) => {
-                const lower = (kw || '').toLowerCase()
-                return departments
-                  .filter(d => (d.departmentName?.toLowerCase() || '').includes(lower) || (d.departmentCode?.toLowerCase() || '').includes(lower))
-                  .map((d) => ({ label: d.departmentName, value: d.departmentCode }))
-              }}
-              getOptionByValue={(val) => {
-                const dep = departments.find(d => d.departmentCode === val)
-                return dep ? { label: dep.departmentName, value: dep.departmentCode } : null
-              }}
-            />
-          </div>
-        </div>
+
 
         {/* Filter Action Buttons aligned with inputs */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: '100%', paddingBottom: 1 }}>

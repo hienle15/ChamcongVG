@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 /* ─────────────────── Design tokens ─────────────────── */
 export const C = {
   primary: 'var(--brand)',
-  primaryHover: '#13546c',
+  primaryHover: '#05315a',
   primaryLight: '#e8f3f6',
   accent: '#0052cc',
   accentLight: '#e6f0ff',
@@ -15,7 +15,7 @@ export const C = {
   warningLight: '#fef3c7',
   surface: '#ffffff',
   bg: '#f1f5f9',
-  sidebar: 'var(--brand)',
+  sidebar: '#07447cff',
   sidebarText: 'rgba(255,255,255,0.80)',
   sidebarActive: 'rgba(255,255,255,0.14)',
   border: '#e2e8f0',
