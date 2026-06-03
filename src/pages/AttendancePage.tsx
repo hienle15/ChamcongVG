@@ -12,103 +12,25 @@ import {
   type DailySummaryItem,
   type DailySummaryParams,
   type DepartmentItem,
+  type AreaInfo,
   type EmployeeLookupItem,
 } from '@/services/api'
-import logo6 from '@/assets/Image/logo6.png'
-import VGSelectSearch from '@/assets/components/ui/VGSelectSearch'
+
 import RawLogsModal from '@/components/RawLogsModal'
 import BulkAddModal from '@/components/BulkAddModal'
+import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import { toast } from 'react-toastify'
 import { saveAs } from 'file-saver'
 import ExcelJS from 'exceljs'
 import * as XLSX from 'xlsx'
 
-/* ─────────────────── Design tokens ─────────────────── */
-const C = {
-  primary: 'var(--brand)',
-  primaryHover: '#13546c',
-  primaryLight: '#e8f3f6',
-  accent: '#0052cc',
-  accentLight: '#e6f0ff',
-  success: '#16a34a',
-  successLight: '#dcfce7',
-  danger: '#dc2626',
-  dangerLight: '#fee2e2',
-  warning: '#d97706',
-  warningLight: '#fef3c7',
-  surface: '#ffffff',
-  bg: '#f1f5f9',
-  sidebar: 'var(--brand)',
-  sidebarText: 'rgba(255,255,255,0.80)',
-  sidebarActive: 'rgba(255,255,255,0.14)',
-  border: '#e2e8f0',
-  textMain: '#0f172a',
-  textSub: '#475569',
-  textMuted: '#94a3b8',
-}
+import AppSidebar from '@/components/layout/AppSidebar'
+import FilterPanel from '@/components/attendance/FilterPanel'
+import AttendanceTable from '@/components/attendance/AttendanceTable'
+import MonthlyExportModal from '@/components/attendance/MonthlyExportModal'
+import { C, s } from '@/styles/attendance.styles'
+import { fmtDate, fmtTimeOnly, fmt, toInputDateTime } from '@/utils/attendance.utils'
 
-/* ─────────────────── Helpers ────────────────────────── */
-const fmt = (iso: string) => {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
-
-const fmtTimeOnly = (iso: string) => {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleTimeString('vi-VN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
-
-const fmtDate = (iso: string) => {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    })
-  } catch {
-    return iso
-  }
-}
-
-const toInputDateTime = (iso?: string) => {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch {
-    return ''
-  }
-}
-
-const CHECK_TYPE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  I: { bg: C.successLight, text: C.success, label: 'Vào' },
-  O: { bg: C.dangerLight, text: C.danger, label: 'Ra' },
-  IN: { bg: C.successLight, text: C.success, label: 'Vào' },
-  OUT: { bg: C.dangerLight, text: C.danger, label: 'Ra' },
-}
-const getCheckType = (t: string) =>
-  CHECK_TYPE_COLORS[t?.toUpperCase()] ?? { bg: C.primaryLight, text: C.primary, label: t || '—' }
 /* ─────────────────── Main component ────────────────── */
 const AttendancePage = () => {
   const { user, logout } = useAuth()
@@ -157,6 +79,74 @@ const AttendancePage = () => {
   /* Sidebar */
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
+
+  /* Monthly export modal */
+  const [isMonthlyExportOpen, setIsMonthlyExportOpen] = useState(false)
+  const [exportMonth, setExportMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [isExportingMonthly, setIsExportingMonthly] = useState(false)
+
+  /* Department tree */
+  const [deptTreeOpen, setDeptTreeOpen] = useState(true)
+  const [selectedDeptCode, setSelectedDeptCode] = useState<string>('')
+
+  /* Build area → department grouped tree from flat list */
+  interface AreaNode {
+    area: AreaInfo
+    departments: DepartmentItem[]
+  }
+  const buildAreaTree = (list: DepartmentItem[]): AreaNode[] => {
+    const areaMap = new Map<string, AreaNode>()
+    const noArea: DepartmentItem[] = []
+    list.forEach(d => {
+      if (d.parentArea) {
+        const key = d.parentArea.areaCode
+        if (!areaMap.has(key)) {
+          areaMap.set(key, { area: d.parentArea, departments: [] })
+        }
+        areaMap.get(key)!.departments.push(d)
+      } else {
+        noArea.push(d)
+      }
+    })
+    const nodes = Array.from(areaMap.values())
+    // Nếu có phòng ban không thuộc khu vực nào, nhóm vào "Khác"
+    if (noArea.length > 0) {
+      nodes.push({
+        area: { areaCode: '__no_area__', areaName: 'Khác' },
+        departments: noArea,
+      })
+    }
+    return nodes
+  }
+  const areaTree = buildAreaTree(departments)
+
+  /* Expanded areas state */
+  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set())
+  const toggleAreaExpand = (code: string) => {
+    setExpandedAreas(prev => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+  }
+
+  const handleSelectDept = (code: string) => {
+    const newCode = selectedDeptCode === code ? '' : code
+    setSelectedDeptCode(newCode)
+    const f: DailySummaryParams = {
+      fromDate: filters.fromDate,
+      toDate: filters.toDate,
+      ...(filters.employeeCode ? { employeeCode: filters.employeeCode } : {}),
+      ...(newCode ? { departmentCode: newCode } : {}),
+    }
+    setFilterDraft(prev => ({ ...prev, departmentCode: newCode }))
+    setFilters(f)
+    setPage(1)
+  }
 
   const showToast = (msg: string, type: 'ok' | 'err' = 'ok') => {
     if (type === 'ok') toast.success(msg)
@@ -208,6 +198,410 @@ const AttendancePage = () => {
     setFilterDraft({ employeeCode: '', departmentCode: '', fromDate: defaultFrom, toDate: defaultTo })
     setFilters({ fromDate: defaultFrom, toDate: defaultTo })
     setPage(1)
+  }
+
+  /* ── Monthly Excel Export (template format) ── */
+  const handleExportExcelMonthly = async () => {
+    if (!exportMonth) { showToast('Vui lòng chọn tháng!', 'err'); return }
+    const [yearStr, monthStr] = exportMonth.split('-')
+    const year = parseInt(yearStr)
+    const month = parseInt(monthStr)
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const fromDate = `${year}-${String(month).padStart(2, '0')}-01`
+    const toDate = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+
+    setIsExportingMonthly(true)
+    try {
+      showToast('Đang tải dữ liệu...', 'ok')
+
+      // Fetch all records for the month (large pageSize)
+      let allRows: DailySummaryItem[] = []
+      const queryParams: DailySummaryParams = {
+        page: 1,
+        pageSize: 500,
+        fromDate,
+        toDate,
+        ...(filterDraft.departmentCode ? { departmentCode: filterDraft.departmentCode } : {}),
+        ...(filterDraft.employeeCode ? { employeeCode: filterDraft.employeeCode } : {})
+      }
+
+      const firstPage = await attendanceApi.getDailySummary(queryParams)
+      allRows = firstPage.items ?? []
+      if (firstPage.totalPages > 1) {
+        for (let p = 2; p <= firstPage.totalPages; p++) {
+          const res = await attendanceApi.getDailySummary({ ...queryParams, page: p })
+          allRows = allRows.concat(res.items ?? [])
+        }
+      }
+
+      if (allRows.length === 0) {
+        showToast('Không có dữ liệu trong tháng này!', 'err')
+        setIsExportingMonthly(false)
+        return
+      }
+
+      // Day-of-week helper (Vietnamese)
+      const viDayNames: Record<number, string> = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6: 'T.7' }
+      const dayNames: string[] = []
+      for (let d = 1; d <= daysInMonth; d++) {
+        dayNames.push(viDayNames[new Date(year, month - 1, d).getDay()])
+      }
+      const isSunday = (d: number) => new Date(year, month - 1, d).getDay() === 0
+
+      // Group rows by departmentCode → employeeCode → day
+      type EmpKey = string
+      type DeptKey = string
+      // map: deptCode -> empCode -> day(1-31) -> DailySummaryItem
+      const deptMap = new Map<DeptKey, Map<EmpKey, Map<number, DailySummaryItem>>>()
+      allRows.forEach(r => {
+        const dept = r.departmentCode || ''
+        const emp = r.employeeCode || ''
+        const day = new Date(r.workDate).getDate()
+        if (!deptMap.has(dept)) deptMap.set(dept, new Map())
+        const empMap = deptMap.get(dept)!
+        if (!empMap.has(emp)) empMap.set(emp, new Map())
+        empMap.get(emp)!.set(day, r)
+      })
+
+      // Gather employee info
+      const empInfoMap = new Map<string, DailySummaryItem>()
+      allRows.forEach(r => { if (!empInfoMap.has(r.employeeCode)) empInfoMap.set(r.employeeCode, r) })
+
+      const workbook = new ExcelJS.Workbook()
+
+      // One sheet per department (or all in one sheet if desired)
+      const deptEntries = Array.from(deptMap.entries())
+
+      // Create a single sheet matching the template
+      const ws = workbook.addWorksheet('ChamCong')
+
+      // Helper: get dept name
+      const getDeptName = (code: string) =>
+        departments.find(d => d.departmentCode === code)?.departmentName || code
+
+      // Styles — brand color #c06252, font Cambria
+      const BRAND = 'FFC06252'          // primary brand color
+      const BRAND_LIGHT = 'FFFCE8E5'    // light tint for dept/total rows
+      const WHITE = 'FFFFFFFF'
+      const titleFont = { name: 'Cambria', size: 14, bold: true }
+      const headerFont = { name: 'Cambria', size: 11, bold: true }
+      const dataFont = { name: 'Cambria', size: 11 }
+      const thinBorder = (): ExcelJS.Border => ({ style: 'thin', color: { argb: BRAND } })
+      const allBorders = () => ({ top: thinBorder(), left: thinBorder(), bottom: thinBorder(), right: thinBorder() })
+      const thinWhiteBorder = (): ExcelJS.Border => ({ style: 'thin', color: { argb: WHITE } })
+      const headerBorders = () => ({ top: thinWhiteBorder(), left: thinWhiteBorder(), bottom: thinWhiteBorder(), right: thinWhiteBorder() })
+      const centerAlign = (): ExcelJS.Alignment => ({ vertical: 'middle', horizontal: 'center', wrapText: true })
+      const leftAlign = (): ExcelJS.Alignment => ({ vertical: 'middle', horizontal: 'left', wrapText: true })
+
+      // Total number of columns: STT(1) + MãNV(2) + CCCD(3) + HọTên(4) + NgàyVào(5) + days(daysInMonth) + CôngChính + TổngCôngChính + TăngCa + ChủNhật + TăngCaChủNhật + GhiChú
+      const dayStartCol = 6 // 1-indexed
+      const dayEndCol = 5 + daysInMonth
+      const colCongChinh = dayEndCol + 1
+      const colTongCongChinh = dayEndCol + 2
+      const colTangCa = dayEndCol + 3
+      const colChuNhat = dayEndCol + 4
+      const colTangCaChuNhat = dayEndCol + 5
+      const colGhiChu = dayEndCol + 6
+      const totalCols = colGhiChu
+
+      // Set column widths
+      ws.getColumn(1).width = 5   // STT
+      ws.getColumn(2).width = 12  // Mã NV
+      ws.getColumn(3).width = 14  // CCCD
+      ws.getColumn(4).width = 22  // Họ và tên
+      ws.getColumn(5).width = 11  // Ngày vào làm
+      for (let d = 1; d <= daysInMonth; d++) {
+        ws.getColumn(dayStartCol + d - 1).width = 4
+      }
+      ws.getColumn(colCongChinh).width = 8
+      ws.getColumn(colTongCongChinh).width = 9
+      ws.getColumn(colTangCa).width = 8
+      ws.getColumn(colChuNhat).width = 8
+      ws.getColumn(colTangCaChuNhat).width = 10
+      ws.getColumn(colGhiChu).width = 14
+
+      let currentRow = 1
+
+      // ── Row 1: Company name ──
+      ws.mergeCells(currentRow, 1, currentRow, totalCols)
+      const companyCell = ws.getCell(currentRow, 1)
+      companyCell.value = 'Công ty: CTY TNHH VINH GIA'
+      companyCell.font = { ...titleFont, size: 12, color: { argb: 'FF555555' } }
+      companyCell.alignment = leftAlign()
+      ws.getRow(currentRow).height = 18
+      currentRow++
+
+      // ── Row 2: Title ──
+      ws.mergeCells(currentRow, 1, currentRow, totalCols)
+      const titleCell = ws.getCell(currentRow, 1)
+      titleCell.value = `BẢNG CHẤM CÔNG THÁNG ${month} NĂM ${year}`
+      titleCell.font = { ...titleFont, size: 16, bold: true, color: { argb: BRAND } }
+      titleCell.alignment = centerAlign()
+      ws.getRow(currentRow).height = 28
+      currentRow++
+
+      // We'll write dept sections below
+      const deptSectionStartRow = currentRow
+
+      let globalStt = 0
+
+      for (const [deptCode, empMap] of deptEntries) {
+        const deptName = getDeptName(deptCode)
+
+        // ── Department header row ──
+        ws.mergeCells(currentRow, 1, currentRow, totalCols)
+        const deptCell = ws.getCell(currentRow, 1)
+        deptCell.value = `BỘ PHẬN/XƯỞNG: ${deptName}`
+        deptCell.font = { ...titleFont, size: 12, bold: true, color: { argb: BRAND } }
+        deptCell.alignment = leftAlign()
+        deptCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND_LIGHT } }
+        ws.getRow(currentRow).height = 20
+        currentRow++
+
+        // ── Column header rows (3 rows): write all cells first, then merge static cols in 1 pass ──
+        const staticCols = [1, 2, 3, 4, 5, colCongChinh, colTongCongChinh, colTangCa, colChuNhat, colTangCaChuNhat, colGhiChu]
+        const hdrFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND } }
+        const sunFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: BRAND_LIGHT } }
+
+        const writeHdrCell = (r: number, col: number, val: any, sun = false) => {
+          const cell = ws.getCell(r, col)
+          cell.value = val
+          // White text on brand bg; red text on Sunday yellow bg
+          cell.font = sun
+            ? { ...headerFont, color: { argb: 'FFCC0000' } }
+            : { ...headerFont, color: { argb: WHITE } }
+          cell.alignment = centerAlign()
+          cell.fill = sun ? sunFill : hdrFill
+          cell.border = headerBorders()
+        }
+
+        const hdrRow1Index = currentRow
+
+        // Row 1: labels
+        ws.getRow(currentRow).height = 30
+        writeHdrCell(currentRow, 1, 'STT')
+        writeHdrCell(currentRow, 2, 'MÃ NHÂN VIÊN')
+        writeHdrCell(currentRow, 3, 'SỐ CCCD')
+        writeHdrCell(currentRow, 4, 'HỌ VÀ TÊN')
+        writeHdrCell(currentRow, 5, 'NGÀY VÀO LÀM')
+        ws.mergeCells(currentRow, dayStartCol, currentRow, dayEndCol)
+        writeHdrCell(currentRow, dayStartCol, 'Ngày Trong Tháng')
+        writeHdrCell(currentRow, colCongChinh, 'Công Chính')
+        writeHdrCell(currentRow, colTongCongChinh, 'Tổng Công Chính')
+        writeHdrCell(currentRow, colTangCa, 'Tăng Ca')
+        writeHdrCell(currentRow, colChuNhat, 'Chủ Nhật')
+        writeHdrCell(currentRow, colTangCaChuNhat, 'Tăng Ca Chủ Nhật')
+        writeHdrCell(currentRow, colGhiChu, 'Ghi Chú')
+        const r1 = currentRow
+        currentRow++
+
+        // Row 2: day numbers
+        ws.getRow(currentRow).height = 18
+        for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
+        for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, d)
+        currentRow++
+
+        // Row 3: day-of-week
+        ws.getRow(currentRow).height = 18
+        for (const sc of staticCols) writeHdrCell(currentRow, sc, null)
+        for (let d = 1; d <= daysInMonth; d++) writeHdrCell(currentRow, dayStartCol + d - 1, dayNames[d - 1], isSunday(d))
+        const hdrRow3Index = currentRow
+        currentRow++
+
+        // Merge static cols across all 3 header rows — ONE merge per column, no double-merge error
+        for (const col of staticCols) {
+          ws.mergeCells(r1, col, hdrRow3Index, col)
+          const mc = ws.getCell(r1, col)
+          mc.alignment = centerAlign()
+          mc.fill = hdrFill
+          mc.border = headerBorders()
+        }
+
+        // ── Employee rows ──
+        let deptTotalCong = 0
+        let deptTotalGio = 0
+        let deptTotalSun = 0
+        let deptTotalSunOT = 0
+
+        const empEntries = Array.from(empMap.entries())
+        for (const [empCode, dayMap] of empEntries) {
+          globalStt++
+          const empInfo = empInfoMap.get(empCode)!
+
+          // Compute totals
+          let tongCong = 0
+          let tangCa = 0
+          let cuaT = 0
+          let tangCaCuaT = 0
+          const overtimeDayMap = new Map<number, number>() // day -> overtime hours
+
+          for (let d = 1; d <= daysInMonth; d++) {
+            const rec = dayMap.get(d)
+            if (!rec) continue
+            if (isSunday(d)) {
+              cuaT++
+              if (rec.workHours > 8) tangCaCuaT += rec.workHours - 8
+            } else {
+              if (rec.workHours > 0) tongCong++
+              if (rec.workHours > 8) {
+                const ot = rec.workHours - 8
+                tangCa += ot
+                overtimeDayMap.set(d, ot)
+              }
+            }
+          }
+
+          deptTotalCong += tongCong
+          deptTotalGio += tangCa
+          deptTotalSun += cuaT
+          deptTotalSunOT += tangCaCuaT
+
+          // Main employee row
+          const mainRow = ws.getRow(currentRow)
+          mainRow.height = 20
+
+          const ngayVaoLam = empInfo.workDate
+            ? new Date(empInfo.workDate.substring(0, 7) + '-01')
+            : null
+
+          const setCell = (col: number, value: any, opts?: { bold?: boolean; color?: string; bg?: string }) => {
+            const cell = ws.getCell(currentRow, col)
+            cell.value = value
+            cell.font = { ...dataFont, bold: opts?.bold, color: opts?.color ? { argb: opts.color } : undefined }
+            cell.alignment = col <= 4 ? leftAlign() : centerAlign()
+            if (opts?.bg) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.bg } }
+            cell.border = allBorders()
+          }
+
+          setCell(1, globalStt)
+          setCell(2, empCode)
+          setCell(3, (empInfo as any).cccd || '')
+          setCell(4, empInfo.employeeName, { bold: true })
+          const startDate = employees.find(e => e.employeeCode === empCode)
+          // Ngày vào làm - try from employee lookup
+          setCell(5, '')
+
+          for (let d = 1; d <= daysInMonth; d++) {
+            const col = dayStartCol + d - 1
+            const rec = dayMap.get(d)
+            const cell = ws.getCell(currentRow, col)
+            if (isSunday(d)) {
+              cell.value = rec ? 'CuT' : ''
+              cell.font = { ...dataFont, color: { argb: 'FFC00000' }, bold: true }
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND_LIGHT } }
+            } else {
+              cell.value = rec && rec.workHours > 0 ? 1 : (rec ? '' : '')
+              cell.font = dataFont
+            }
+            cell.alignment = centerAlign()
+            cell.border = allBorders()
+          }
+
+          setCell(colCongChinh, tongCong, { bold: true, color: 'FF1F497D' })
+          setCell(colTongCongChinh, tongCong, { bold: true })
+          setCell(colTangCa, tangCa > 0 ? tangCa : 0, { color: tangCa > 0 ? 'FF70AD47' : undefined })
+          setCell(colChuNhat, cuaT)
+          setCell(colTangCaChuNhat, tangCaCuaT > 0 ? tangCaCuaT : 0)
+          setCell(colGhiChu, '')
+          currentRow++
+
+          // Overtime sub-row (only if there are overtime entries)
+          if (overtimeDayMap.size > 0 || tangCaCuaT > 0) {
+            const otRow = ws.getRow(currentRow)
+            otRow.height = 16
+            // Empty static cols
+            for (const col of [1, 2, 3, 4, 5]) {
+              const cell = ws.getCell(currentRow, col)
+              cell.value = ''
+              cell.border = allBorders()
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            }
+            for (let d = 1; d <= daysInMonth; d++) {
+              const col = dayStartCol + d - 1
+              const cell = ws.getCell(currentRow, col)
+              const ot = overtimeDayMap.get(d)
+              cell.value = ot ? ot : ''
+              cell.font = { ...dataFont, color: { argb: 'FF16A34A' }, size: 10 }
+              cell.alignment = centerAlign()
+              cell.border = allBorders()
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            }
+            // Summary cols for OT row
+            for (const col of [colCongChinh, colTongCongChinh, colChuNhat]) {
+              const cell = ws.getCell(currentRow, col)
+              cell.value = ''
+              cell.border = allBorders()
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            }
+            const otTotalCell = ws.getCell(currentRow, colTangCa)
+            otTotalCell.value = tangCa > 0 ? tangCa : ''
+            otTotalCell.font = { ...dataFont, color: { argb: 'FF16A34A' }, bold: true }
+            otTotalCell.alignment = centerAlign()
+            otTotalCell.border = allBorders()
+            otTotalCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            const otCuaTCell = ws.getCell(currentRow, colTangCaChuNhat)
+            otCuaTCell.value = tangCaCuaT > 0 ? tangCaCuaT : ''
+            otCuaTCell.font = { ...dataFont, color: { argb: 'FFC00000' }, bold: true }
+            otCuaTCell.alignment = centerAlign()
+            otCuaTCell.border = allBorders()
+            otCuaTCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            ws.getCell(currentRow, colGhiChu).value = ''
+            ws.getCell(currentRow, colGhiChu).border = allBorders()
+            ws.getCell(currentRow, colGhiChu).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+            currentRow++
+          }
+        }
+
+        // ── Department total row ──
+        const totRow = ws.getRow(currentRow)
+        totRow.height = 20
+        ws.mergeCells(currentRow, 1, currentRow, 5)
+        const totLabelCell = ws.getCell(currentRow, 1)
+        totLabelCell.value = 'TỔNG CỘNG'
+        totLabelCell.font = { ...headerFont, bold: true }
+        totLabelCell.alignment = centerAlign()
+        totLabelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } }
+        totLabelCell.border = allBorders()
+        for (let d = 1; d <= daysInMonth; d++) {
+          const cell = ws.getCell(currentRow, dayStartCol + d - 1)
+          cell.value = ''
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } }
+          cell.border = allBorders()
+        }
+        const setTotCell = (col: number, val: any) => {
+          const cell = ws.getCell(currentRow, col)
+          cell.value = val
+          cell.font = { ...headerFont, bold: true }
+          cell.alignment = centerAlign()
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } }
+          cell.border = allBorders()
+        }
+        setTotCell(colCongChinh, deptTotalCong)
+        setTotCell(colTongCongChinh, deptTotalCong)
+        setTotCell(colTangCa, deptTotalGio)
+        setTotCell(colChuNhat, deptTotalSun)
+        setTotCell(colTangCaChuNhat, deptTotalSunOT)
+        setTotCell(colGhiChu, '')
+        currentRow++
+
+        // spacing row between departments
+        currentRow++
+      }
+
+      // Freeze top rows & first 5 cols
+      ws.views = [{ state: 'frozen', xSplit: 5, ySplit: deptSectionStartRow + 3, topLeftCell: `F${deptSectionStartRow + 4}`, activeCell: 'A1' }]
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      saveAs(blob, `BangChamCong_T${month}_${year}.xlsx`)
+      showToast('Xuất Excel theo tháng thành công!', 'ok')
+      setIsMonthlyExportOpen(false)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Lỗi không xác định'
+      showToast('Lỗi xuất Excel: ' + msg, 'err')
+    } finally {
+      setIsExportingMonthly(false)
+    }
   }
 
   const handleExportExcelRaw = async () => {
@@ -350,7 +744,7 @@ const AttendancePage = () => {
       const dataRaw: any[][] = XLSX.utils.sheet_to_json(wsRaw, { header: 1 })
 
       const rowsData: any[] = []
-      let dataStartRow = 4 
+      let dataStartRow = 4
 
       for (let i = 0; i < Math.min(10, dataRaw.length); i++) {
         const row = dataRaw[i]
@@ -385,12 +779,12 @@ const AttendancePage = () => {
           sumGio += (Number(tongGio) || 0)
         }
 
-        rowsData.push({ 
-          stt: stt ?? '', 
-          phongBan: phongBan ?? '', 
-          tongCong: tongCong ?? '', 
+        rowsData.push({
+          stt: stt ?? '',
+          phongBan: phongBan ?? '',
+          tongCong: tongCong ?? '',
           tongGio: tongGio ?? '',
-          isTotalRow 
+          isTotalRow
         })
       }
 
@@ -425,10 +819,10 @@ const AttendancePage = () => {
 
       worksheet.addRow([])
 
-      worksheet.getColumn(1).width = 10 
-      worksheet.getColumn(2).width = 30 
-      worksheet.getColumn(3).width = 25 
-      worksheet.getColumn(4).width = 25 
+      worksheet.getColumn(1).width = 10
+      worksheet.getColumn(2).width = 30
+      worksheet.getColumn(3).width = 25
+      worksheet.getColumn(4).width = 25
 
       const headerRow = worksheet.addRow(['STT', 'Phòng ban', 'Tổng công làm', 'Tổng giờ tăng ca'])
       headerRow.height = 30
@@ -445,10 +839,10 @@ const AttendancePage = () => {
       rowsData.forEach((r, idx) => {
         const addedRow = worksheet.addRow([r.stt, r.phongBan, r.tongCong, r.tongGio])
         addedRow.height = 24
-        
+
         const isTotalRow = r.isTotalRow
         const isEven = idx % 2 === 0
-        
+
         addedRow.eachCell((cell, colNumber) => {
           let fontColor = 'FF1E293B'
           let bold = isTotalRow
@@ -460,7 +854,7 @@ const AttendancePage = () => {
           cell.font = { name: 'Cambria', color: { argb: fontColor }, bold, size: 11 }
           cell.alignment = { vertical: 'middle', horizontal: colNumber >= 3 || colNumber === 1 ? 'center' : 'left' }
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } }
-          
+
           cell.border = {
             top: { style: 'thin', color: { argb: 'FFEDF2F7' } }, bottom: { style: 'thin', color: { argb: 'FFEDF2F7' } },
             left: { style: 'thin', color: { argb: 'FFEDF2F7' } }, right: { style: 'thin', color: { argb: 'FFEDF2F7' } }
@@ -484,54 +878,19 @@ const AttendancePage = () => {
   return (
     <div style={s.shell}>
       {/* ═══════════ SIDEBAR ═══════════ */}
-      <aside style={{ ...s.sidebar, width: sidebarOpen ? 240 : 64 }}>
-        <div style={s.sidebarLogo}>
-          <img
-            src={logo6}
-            alt="Vinh Gia"
-            style={{
-              width: sidebarOpen ? 90 : 38,
-              height: 'auto',
-              objectFit: 'contain',
-              filter: 'brightness(0) invert(1)',
-              display: 'block',
-              margin: '0 auto',
-            }}
-          />
-        </div>
-
-        <nav style={s.sidebarNav}>
-          {[
-            { icon: 'event_note', label: 'Chấm công', active: true },
-          ].map((item) => (
-            <div
-              key={item.label}
-              style={{
-                ...s.navItem,
-                background: item.active ? C.sidebarActive : 'transparent',
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ ...s.navIcon, color: item.active ? '#fff' : C.sidebarText }}>{item.icon}</span>
-              {sidebarOpen && <span style={{ color: item.active ? '#fff' : C.sidebarText, fontSize: 14, fontWeight: item.active ? 500 : 400 }}>{item.label}</span>}
-            </div>
-          ))}
-        </nav>
-
-        <div style={s.sidebarUser}>
-          <div style={s.sidebarAvatar}>
-            <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{user?.displayName?.charAt(0)?.toUpperCase() ?? 'U'}</span>
-          </div>
-          {sidebarOpen && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <div style={{ color: '#fff', fontWeight: 600, fontSize: 13 }}>{user?.displayName ?? user?.username}</div>
-              <div style={{ color: C.sidebarText, fontSize: 11 }}>{user?.role}</div>
-            </div>
-          )}
-          <button onClick={logout} style={s.logoutBtn} title="Đăng xuất">
-            <span className="material-symbols-outlined" style={{ color: C.sidebarText, fontSize: 20 }}>logout</span>
-          </button>
-        </div>
-      </aside>
+      <AppSidebar
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        user={user}
+        logout={logout}
+        deptTreeOpen={deptTreeOpen}
+        setDeptTreeOpen={setDeptTreeOpen}
+        selectedDeptCode={selectedDeptCode}
+        handleSelectDept={handleSelectDept}
+        areaTree={areaTree}
+        expandedAreas={expandedAreas}
+        toggleAreaExpand={toggleAreaExpand}
+      />
 
       {/* ═══════════ MAIN ═══════════ */}
       <div style={s.main}>
@@ -545,327 +904,35 @@ const AttendancePage = () => {
         </header>
 
         <div style={s.content}>
+          <FilterPanel
+            filterDraft={filterDraft}
+            setFilterDraft={setFilterDraft}
+            employees={employees}
+            departments={departments}
+            applyFilters={applyFilters}
+            clearFilters={clearFilters}
+          />
 
-          <div style={s.filterCard}>
-            <div style={s.filterGrid}>
-              <FilterInput
-                label="Từ ngày"
-                value={filterDraft.fromDate}
-                onChange={(v) => setFilterDraft({ ...filterDraft, fromDate: v })}
-                type="date"
-              />
-              <FilterInput
-                label="Đến ngày"
-                value={filterDraft.toDate}
-                onChange={(v) => setFilterDraft({ ...filterDraft, toDate: v })}
-                type="date"
-              />
-              <div>
-                <label style={s.filterLabel}>Mã nhân viên</label>
-                <div style={{ ...s.filterInputWrap, border: 'none', background: 'transparent', padding: 0 }}>
-
-                  <VGSelectSearch
-                    value={filterDraft.employeeCode}
-                    onChange={(v) => setFilterDraft({ ...filterDraft, employeeCode: v ? String(v.value) : '' })}
-                    placeholder="Tất cả nhân viên"
-                    loadOptions={async (kw) => {
-                      const lower = (kw || '').toLowerCase();
-                      return employees
-                        .filter(e => (e.fullName?.toLowerCase() || '').includes(lower) || (e.employeeCode?.toLowerCase() || '').includes(lower))
-                        .map((e) => ({ label: `${e.fullName} (${e.employeeCode})`, value: e.employeeCode }));
-                    }}
-                    getOptionByValue={(val) => {
-                      const emp = employees.find(e => e.employeeCode === val);
-                      return emp ? { label: `${emp.fullName} (${emp.employeeCode})`, value: emp.employeeCode } : null;
-                    }}
-                  />
-                </div>
-              </div>
-              <div>
-                <label style={s.filterLabel}>Phòng ban</label>
-                <div style={{ ...s.filterInputWrap, border: 'none', background: 'transparent', padding: 0 }}>
-
-                  <VGSelectSearch
-                    value={filterDraft.departmentCode}
-                    onChange={(v) => setFilterDraft({ ...filterDraft, departmentCode: v ? String(v.value) : '' })}
-                    placeholder="Tất cả phòng ban"
-                    loadOptions={async (kw) => {
-                      const lower = (kw || '').toLowerCase();
-                      return departments
-                        .filter(d => (d.departmentName?.toLowerCase() || '').includes(lower) || (d.departmentCode?.toLowerCase() || '').includes(lower))
-                        .map((d) => ({ label: d.departmentName, value: d.departmentCode }));
-                    }}
-                    getOptionByValue={(val) => {
-                      const dep = departments.find(d => d.departmentCode === val);
-                      return dep ? { label: dep.departmentName, value: dep.departmentCode } : null;
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Filter Action Buttons aligned with inputs */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: '100%', paddingBottom: 1 }}>
-                <button onClick={applyFilters} style={s.primaryBtn}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 17 }}>search</span>
-                  Tìm kiếm
-                </button>
-                <button onClick={clearFilters} style={s.outlineBtn}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 17 }}>clear</span>
-                  Xóa lọc
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Table ── */}
-          <div style={s.tableCard}>
-            {/* Table header row */}
-            <div style={s.tableHeader}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: C.textMain }}>
-                Danh sách chấm công
-                <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 8, fontSize: 13 }}>
-                  ({totalItems} bản ghi)
-                </span>
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                    style={{ ...s.primaryBtn, background: '#16a34a', fontFamily: 'Cambria, serif' }}
-                    onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
-                    Xuất Excel
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>expand_more</span>
-                  </button>
-
-                  {isExportMenuOpen && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      marginTop: 4,
-                      background: '#fff',
-                      borderRadius: 8,
-                      boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                      border: `1px solid ${C.border}`,
-                      padding: '4px 0',
-                      zIndex: 100,
-                      minWidth: 230,
-                    }}>
-                      <button
-                        onClick={() => {
-                          setIsExportMenuOpen(false)
-                          handleExportExcelRaw()
-                        }}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '10px 16px',
-                          background: 'none',
-                          border: 'none',
-                          fontSize: 13,
-                          color: C.textMain,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          fontFamily: 'Inter, sans-serif'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 16, color: C.textSub }}>list_alt</span>
-                        Xuất danh sách chấm công
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsExportMenuOpen(false)
-                          handleExportExcelStatistics()
-                        }}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '10px 16px',
-                          background: 'none',
-                          border: 'none',
-                          fontSize: 13,
-                          color: C.textMain,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          fontFamily: 'Inter, sans-serif'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 16, color: C.textSub }}>analytics</span>
-                        Xuất bảng công và tăng ca
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {user?.displayName === 'admin' && (
-                  <>
-                    <button onClick={() => setIsBulkAddOpen(true)} style={s.primaryBtn}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>playlist_add</span>
-                      Thêm chấm công hàng loạt
-                    </button>
-                    <div style={{ width: 1, height: 24, background: C.border, margin: '0 4px' }}></div>
-                  </>
-                )}
-                <button
-                  onClick={() => fetchData(page, filters)}
-                  style={s.iconBtn}
-                  title="Làm mới"
-                >
-                  <span className="material-symbols-outlined" style={{ color: C.textSub }}>refresh</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Table */}
-            <div style={{ overflowX: 'auto' }}>
-              <table style={s.table}>
-                <thead>
-                  <tr>
-                    {['STT', 'Mã NV', 'Tên nhân viên', 'Phòng ban', 'Ngày', 'Thứ', 'Ca', 'Giờ vào', 'Giờ ra', 'Giờ làm', 'Thao tác'].map((h) => (
-                      <th key={h} style={{ ...s.th, ...(h === 'STT' ? { width: 60, textAlign: 'center' } : {}) }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {isLoadingData ? (
-                    <tr>
-                      <td colSpan={11} style={s.emptyCell}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                          <LoadingSpinner />
-                          <div style={{ marginTop: 8, color: C.textMuted, fontSize: 13 }}>Đang tải dữ liệu...</div>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} style={s.emptyCell}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: 48, color: C.textMuted }}>inbox</span>
-                          <div style={{ marginTop: 8, color: C.textMuted, fontSize: 14 }}>Không có dữ liệu</div>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    rows.map((row, idx) => {
-                      return (
-                        <tr
-                          key={`${row.employeeCode}_${row.workDate}`}
-                          style={{
-                            ...s.tr,
-                            background: idx % 2 === 0 ? '#fff' : '#f8fafc',
-                          }}
-                        >
-                          <td style={{ ...s.td, textAlign: 'center', fontWeight: 500, color: C.textSub }}>{(page - 1) * pageSize + idx + 1}</td>
-                          <td style={{ ...s.td, fontFamily: 'monospace', fontSize: 13 }}>{row.employeeCode}</td>
-                          <td style={{ ...s.td, fontWeight: 500, color: C.textMain }}>{row.employeeName}</td>
-                          <td style={s.td}>{departments.find((d) => d.departmentCode === row.departmentCode)?.departmentName || row.departmentCode || '—'}</td>
-                          <td style={s.td}>{fmtDate(row.workDate)}</td>
-                          <td style={{ ...s.td, fontSize: 13 }}>{row.weekDayName || '—'}</td>
-                          <td style={s.td}>{row.shiftName || row.shiftCode || '—'}</td>
-                          <td style={{ ...s.td, fontWeight: 600, color: C.success }}>{fmtTimeOnly(row.rawCheckIn)}</td>
-                          <td style={{ ...s.td, fontWeight: 600, color: C.warning }}>{fmtTimeOnly(row.displayCheckOut)}</td>
-                          <td style={{ ...s.td, fontWeight: 700, color: C.textMain }}>{row.workHours > 0 ? <span style={{ color: C.success }}>{row.workHours}h</span> : '—'}</td>
-                          <td style={s.td}>
-                            <button onClick={() => setSelectedRow(row)} style={s.iconBtn} title="Xem chi tiết & thao tác">
-                              <span className="material-symbols-outlined" style={{ color: C.primary, fontSize: 20 }}>visibility</span>
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div style={s.pagination}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span style={{ fontSize: 13, color: C.textMuted }}>
-                  Trang {page} / {totalPages} · {totalItems} bản ghi
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 13, color: C.textMuted }}>Hiển thị:</span>
-                  <select 
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value))
-                      setPage(1)
-                    }}
-                    style={{
-                      padding: '2px 6px',
-                      borderRadius: 4,
-                      border: `1px solid ${C.border}`,
-                      fontSize: 13,
-                      outline: 'none',
-                      cursor: 'pointer',
-                      color: C.textMain
-                    }}
-                  >
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                    <option value={200}>200</option>
-                    <option value={500}>500</option>
-                  </select>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button
-                  onClick={() => setPage(1)}
-                  disabled={page === 1}
-                  style={s.pageBtn(page === 1)}
-                  title="Trang đầu"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>first_page</span>
-                </button>
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  style={s.pageBtn(page === 1)}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
-                </button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  const start = Math.max(1, Math.min(page - 2, totalPages - 4))
-                  const p = start + i
-                  return p <= totalPages ? (
-                    <button
-                      key={p}
-                      onClick={() => setPage(p)}
-                      style={s.pageNumBtn(p === page)}
-                    >
-                      {p}
-                    </button>
-                  ) : null
-                })}
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  style={s.pageBtn(page === totalPages)}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
-                </button>
-                <button
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                  style={s.pageBtn(page === totalPages)}
-                  title="Trang cuối"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>last_page</span>
-                </button>
-              </div>
-            </div>
-          </div>
+          <AttendanceTable
+            rows={rows}
+            isLoadingData={isLoadingData}
+            page={page}
+            setPage={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            totalItems={totalItems}
+            totalPages={totalPages}
+            departments={departments}
+            setSelectedRow={setSelectedRow}
+            isExportMenuOpen={isExportMenuOpen}
+            setIsExportMenuOpen={setIsExportMenuOpen}
+            handleExportExcelRaw={handleExportExcelRaw}
+            handleExportExcelStatistics={handleExportExcelStatistics}
+            setIsMonthlyExportOpen={setIsMonthlyExportOpen}
+            user={user}
+            setIsBulkAddOpen={setIsBulkAddOpen}
+            fetchData={() => fetchData(page, filters)}
+          />
         </div>
       </div>
 
@@ -894,6 +961,110 @@ const AttendancePage = () => {
             showToast('Thêm hàng loạt thành công!', 'ok')
           }}
         />
+      )}
+
+      {/* ═══════════ MONTHLY EXPORT MODAL ═══════════ */}
+      {isMonthlyExportOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(15,23,42,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(4px)',
+          animation: 'fadeIn 0.18s ease'
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
+            padding: '32px 36px',
+            minWidth: 360,
+            maxWidth: 420,
+            animation: 'slideIn 0.2s ease'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: 'linear-gradient(135deg,#16a34a,#15803d)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 22 }}>calendar_month</span>
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.textMain }}>Xuất Excel theo tháng</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>Chọn tháng để xuất bảng chấm công theo mẫu</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: C.textSub, marginBottom: 8 }}>
+                Tháng / Năm
+              </label>
+              <input
+                type="month"
+                value={exportMonth}
+                onChange={e => setExportMonth(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  border: `1.5px solid ${C.border}`,
+                  fontSize: 15,
+                  fontFamily: 'Inter, sans-serif',
+                  color: C.textMain,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  background: '#f8fafc'
+                }}
+                onFocus={e => e.target.style.borderColor = '#16a34a'}
+                onBlur={e => e.target.style.borderColor = C.border}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setIsMonthlyExportOpen(false)}
+                disabled={isExportingMonthly}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: 8,
+                  border: `1.5px solid ${C.border}`,
+                  background: '#fff',
+                  color: C.textSub,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'Inter, sans-serif'
+                }}
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleExportExcelMonthly}
+                disabled={isExportingMonthly || !exportMonth}
+                style={{
+                  padding: '9px 22px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: isExportingMonthly ? '#86efac' : 'linear-gradient(135deg,#16a34a,#15803d)',
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isExportingMonthly ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  fontFamily: 'Inter, sans-serif'
+                }}
+              >
+                {isExportingMonthly ? (
+                  <><LoadingSpinner />Đang xuất...</>
+                ) : (
+                  <><span className="material-symbols-outlined" style={{ fontSize: 17 }}>download</span>Xuất Excel</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`
@@ -935,494 +1106,95 @@ const FilterInput = ({ label, value, onChange, placeholder, icon, type = 'text' 
 )
 
 
-/* ─────────────────── Loading Spinner ────────────────── */
-const LoadingSpinner = () => (
-  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.9s linear infinite' }}>
-    <circle cx="12" cy="12" r="10" stroke="#e2e8f0" strokeWidth="3" />
-    <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--brand)" strokeWidth="3" strokeLinecap="round" />
-  </svg>
-)
+/* ─────────────────── Dept Tree Node ────────────────── */
 
-/* ─────────────────── Styles ─────────────────────────── */
-const s = {
-  shell: {
-    display: 'flex',
-    height: '100vh',
-    width: '100vw',
-    overflow: 'hidden',
-    fontFamily: "'Inter', sans-serif",
-    background: C.bg,
-  } as CSSProperties,
+type DeptNodeType = DepartmentItem & { children: DeptNodeType[] }
 
-  sidebar: {
-    background: C.sidebar,
-    display: 'flex',
-    flexDirection: 'column',
-    flexShrink: 0,
-    transition: 'width 0.25s ease',
-    overflow: 'hidden',
-    borderRight: 'none',
-    boxShadow: '4px 0 16px rgba(0,0,0,0.15)',
-    zIndex: 10,
-  } as CSSProperties,
-
-  sidebarLogo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    padding: '20px 14px 16px',
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
-    flexShrink: 0,
-  } as CSSProperties,
-
-  sidebarLogoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    background: 'rgba(255,255,255,0.15)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    border: '1px solid rgba(255,255,255,0.2)',
-  } as CSSProperties,
-
-  sidebarLogoText: {
-    color: '#fff',
-    fontWeight: 700,
-    fontSize: 15,
-    whiteSpace: 'nowrap' as const,
-    letterSpacing: '-0.01em',
-  } as CSSProperties,
-
-  sidebarNav: {
-    flex: 1,
-    padding: '12px 8px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2,
-    overflow: 'hidden',
-  } as CSSProperties,
-
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    padding: '10px 12px',
-    borderRadius: 10,
-    cursor: 'pointer',
-    transition: 'background 0.15s',
-    whiteSpace: 'nowrap' as const,
-    overflow: 'hidden',
-  } as CSSProperties,
-
-  navIcon: {
-    flexShrink: 0,
-    fontSize: 22,
-  } as CSSProperties,
-
-  sidebarUser: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    padding: '14px 12px',
-    borderTop: '1px solid rgba(255,255,255,0.08)',
-    flexShrink: 0,
-  } as CSSProperties,
-
-  sidebarAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    background: 'rgba(255,255,255,0.2)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    border: '2px solid rgba(255,255,255,0.3)',
-  } as CSSProperties,
-
-  logoutBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: 4,
-    borderRadius: 6,
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-  } as CSSProperties,
-
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  } as CSSProperties,
-
-  topbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px 24px',
-    background: C.surface,
-    borderBottom: `1px solid ${C.border}`,
-    flexShrink: 0,
-    boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-  } as CSSProperties,
-
-  content: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '20px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 16,
-  } as CSSProperties,
-
-  statsRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: 14,
-    flexShrink: 0,
-  } as CSSProperties,
-
-  statCard: {
-    background: C.surface,
-    borderRadius: 14,
-    padding: '18px 20px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-    border: `1px solid ${C.border}`,
-  } as CSSProperties,
-
-  statIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  } as CSSProperties,
-
-  filterCard: {
-    background: C.surface,
-    borderRadius: 14,
-    padding: '18px 20px',
-    border: `1px solid ${C.border}`,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-    flexShrink: 0,
-  } as CSSProperties,
-
-  filterGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
-    gap: 12,
-  } as CSSProperties,
-
-  filterLabel: {
-    display: 'block',
-    fontSize: 11,
-    fontWeight: 600,
-    color: C.textSub,
-    marginBottom: 5,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.04em',
-  } as CSSProperties,
-
-  filterInputWrap: {
-    position: 'relative',
-  } as CSSProperties,
-
-  filterInput: {
-    width: '100%',
-    height: 38,
-    padding: '0 10px',
-    border: `1px solid ${C.border}`,
-    borderRadius: 8,
-    fontSize: 13,
-    color: C.textMain,
-    background: '#f8fafc',
-    outline: 'none',
-    fontFamily: "'Inter', sans-serif",
-    transition: 'border-color 0.15s',
-    boxSizing: 'border-box' as const,
-  } as CSSProperties,
-
-  filterSelect: {
-    width: '100%',
-    padding: '8px 10px',
-    border: `1.5px solid ${C.border}`,
-    borderRadius: 8,
-    fontSize: 13,
-    color: C.textMain,
-    background: '#f8fafc',
-    outline: 'none',
-    fontFamily: "'Inter', sans-serif",
-    cursor: 'pointer',
-    boxSizing: 'border-box' as const,
-  } as CSSProperties,
-
-  tableCard: {
-    background: C.surface,
-    borderRadius: 14,
-    border: `1px solid ${C.border}`,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    minHeight: 0,
-  } as CSSProperties,
-
-  tableHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '14px 20px',
-    borderBottom: `1px solid ${C.border}`,
-    flexShrink: 0,
-  } as CSSProperties,
-
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse' as const,
-    fontSize: 13,
-    tableLayout: 'auto' as const,
-  } as CSSProperties,
-
-  th: {
-    padding: '10px 14px',
-    textAlign: 'left' as const,
-    fontSize: 11,
-    fontWeight: 700,
-    color: C.textMuted,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.06em',
-    background: '#f8fafc',
-    borderBottom: `1px solid ${C.border}`,
-    whiteSpace: 'nowrap' as const,
-  } as CSSProperties,
-
-  tr: {
-    transition: 'background 0.1s',
-  } as CSSProperties,
-
-  td: {
-    padding: '10px 14px',
-    color: C.textSub,
-    borderBottom: `1px solid #f1f5f9`,
-    verticalAlign: 'middle' as const,
-    whiteSpace: 'nowrap' as const,
-  } as CSSProperties,
-
-  emptyCell: {
-    padding: '60px 20px',
-    textAlign: 'center' as const,
-    color: C.textMuted,
-  } as CSSProperties,
-
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    padding: '3px 10px',
-    borderRadius: 20,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.03em',
-  } as CSSProperties,
-
-  pagination: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 20px',
-    borderTop: `1px solid ${C.border}`,
-    flexShrink: 0,
-  } as CSSProperties,
-
-  pageBtn: (disabled: boolean): CSSProperties => ({
-    width: 32,
-    height: 32,
-    border: `1px solid ${C.border}`,
-    borderRadius: 7,
-    background: disabled ? '#f8fafc' : C.surface,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: disabled ? 0.4 : 1,
-    color: C.textSub,
-  }),
-
-  pageNumBtn: (active: boolean): CSSProperties => ({
-    width: 32,
-    height: 32,
-    border: active ? 'none' : `1px solid ${C.border}`,
-    borderRadius: 7,
-    background: active ? C.primary : C.surface,
-    color: active ? '#fff' : C.textSub,
-    fontWeight: active ? 700 : 400,
-    fontSize: 13,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }),
-
-  /* Buttons */
-  primaryBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    padding: '0 16px',
-    background: C.primary,
-    color: '#fff',
-    border: 'none',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: "'Inter', sans-serif",
-    transition: 'background 0.15s',
-  } as CSSProperties,
-
-  outlineBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    padding: '0 16px',
-    background: 'transparent',
-    color: C.textSub,
-    border: `1px solid ${C.border}`,
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: "'Inter', sans-serif",
-  } as CSSProperties,
-
-  dangerBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 16px',
-    background: C.danger,
-    color: '#fff',
-    border: 'none',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: "'Inter', sans-serif",
-  } as CSSProperties,
-
-  iconBtn: {
-    width: 36,
-    height: 36,
-    border: 'none',
-    background: 'transparent',
-    cursor: 'pointer',
-    borderRadius: 8,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  } as CSSProperties,
-
-  dateBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 12px',
-    background: '#f1f5f9',
-    borderRadius: 8,
-    border: `1px solid ${C.border}`,
-  } as CSSProperties,
-
-  errorBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '12px 20px',
-    background: C.dangerLight,
-    color: C.danger,
-    fontSize: 13,
-    fontWeight: 500,
-    borderBottom: `1px solid #fca5a5`,
-  } as CSSProperties,
-
-  /* Modal */
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(15,23,42,0.5)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 100,
-    animation: 'fadeIn 0.2s ease',
-  } as CSSProperties,
-
-  modal: {
-    background: C.surface,
-    borderRadius: 16,
-    width: '90%',
-    maxWidth: 560,
-    maxHeight: '90vh',
-    overflow: 'auto',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-    animation: 'slideIn 0.2s ease',
-  } as CSSProperties,
-
-  modalHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '18px 24px',
-    borderBottom: `1px solid ${C.border}`,
-    flexShrink: 0,
-  } as CSSProperties,
-
-  formGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 16,
-  } as CSSProperties,
-
-  formField: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 5,
-  } as CSSProperties,
-
-  formLabel: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: C.textSub,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.04em',
-  } as CSSProperties,
-
-  formInput: {
-    padding: '9px 12px',
-    border: `1.5px solid ${C.border}`,
-    borderRadius: 8,
-    fontSize: 14,
-    color: C.textMain,
-    outline: 'none',
-    fontFamily: "'Inter', sans-serif",
-    background: '#f8fafc',
-    width: '100%',
-    boxSizing: 'border-box' as const,
-  } as CSSProperties,
+interface DeptTreeNodeProps {
+  node: DeptNodeType
+  depth: number
+  selectedCode: string
+  expandedCodes: Set<string>
+  onSelect: (code: string) => void
+  onToggle: (code: string) => void
 }
+
+const DeptTreeNode = ({ node, depth, selectedCode, expandedCodes, onSelect, onToggle }: DeptTreeNodeProps) => {
+  const isSelected = selectedCode === node.departmentCode
+  const isExpanded = expandedCodes.has(node.departmentCode)
+  const hasChildren = node.children.length > 0
+  const indentPx = 24 + depth * 14
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: `7px 12px 7px ${indentPx}px`,
+          borderRadius: 8,
+          cursor: 'pointer',
+          fontSize: 13,
+          color: isSelected ? '#fff' : 'rgba(255,255,255,0.80)',
+          background: isSelected ? 'rgba(255,255,255,0.14)' : 'transparent',
+          transition: 'background 0.15s',
+          fontWeight: isSelected ? 600 : 400,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+        }}
+        onClick={() => {
+          onSelect(node.departmentCode)
+          if (hasChildren) onToggle(node.departmentCode)
+        }}
+        title={node.departmentName}
+      >
+        {hasChildren ? (
+          <span
+            className="material-symbols-outlined"
+            style={{
+              fontSize: 14,
+              flexShrink: 0,
+              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s',
+              color: isSelected ? '#fff' : 'rgba(255,255,255,0.6)',
+            }}
+            onClick={(e) => { e.stopPropagation(); onToggle(node.departmentCode) }}
+          >
+            chevron_right
+          </span>
+        ) : (
+          <span
+            className="material-symbols-outlined"
+            style={{ fontSize: 13, flexShrink: 0, color: isSelected ? '#fff' : 'rgba(255,255,255,0.4)' }}
+          >
+            fiber_manual_record
+          </span>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.departmentName}</span>
+      </div>
+
+      {/* Children */}
+      {hasChildren && isExpanded && (
+        <div>
+          {node.children.map(child => (
+            <DeptTreeNode
+              key={child.departmentCode}
+              node={child}
+              depth={depth + 1}
+              selectedCode={selectedCode}
+              expandedCodes={expandedCodes}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+
 
 export default AttendancePage

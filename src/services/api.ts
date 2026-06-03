@@ -154,9 +154,22 @@ export interface DailySummaryParams {
   toDate: string
 }
 
+export interface AreaInfo {
+  areaCode: string
+  areaName: string
+  companyCode?: string
+  areaAddress?: string
+  contactPerson?: string
+  contactPhone?: string
+}
+
 export interface DepartmentItem {
   departmentCode: string
   departmentName: string
+  companyCode?: string
+  areaCode?: string | null
+  parentCode?: string | null
+  parentArea?: AreaInfo | null
   [key: string]: any
 }
 

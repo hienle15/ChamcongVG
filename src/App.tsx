@@ -9,7 +9,7 @@ import 'react-toastify/dist/ReactToastify.css'
 const AppRouter = () => {
   const { isAuthenticated, isLoading } = useAuth()
 
-  useEffect(() => {
+useEffect(() => {
     // Update page title based on auth state
     document.title = isAuthenticated ? 'Bảng chấm công' : 'Vinh Gia'
   }, [isAuthenticated])
