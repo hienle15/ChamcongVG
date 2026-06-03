@@ -59,9 +59,9 @@ export interface AuthResponse {
 
 export const authApi = {
   login: (body: LoginRequest) =>
-    request<AuthResponse>('POST', '/api/auth/login', body),
+    request<AuthResponse>('POST', '/auth/login', body),
 
-  me: () => request<AuthResponse>('GET', '/api/auth/me'),
+  me: () => request<AuthResponse>('GET', '/auth/me'),
 }
 
 /* ═══════════════════════════ ATTENDANCE LOGS ════════════════════════════ */
@@ -169,8 +169,8 @@ export interface EmployeeLookupItem {
 }
 
 export const lookupApi = {
-  getDepartments: () => request<DepartmentItem[]>('GET', '/api/departments'),
-  getEmployees: () => request<EmployeeLookupItem[]>('GET', '/api/employees/lookup'),
+  getDepartments: () => request<DepartmentItem[]>('GET', '/departments'),
+  getEmployees: () => request<EmployeeLookupItem[]>('GET', '/employees/lookup'),
 }
 
 export const attendanceApi = {
@@ -184,7 +184,7 @@ export const attendanceApi = {
     if (params.toDate) qs.set('toDate', params.toDate)
     if (params.checkType) qs.set('checkType', params.checkType)
     const query = qs.toString()
-    return request<AttendanceListResponse>('GET', `/api/attendance-logs${query ? `?${query}` : ''}`)
+    return request<AttendanceListResponse>('GET', `/attendance-logs${query ? `?${query}` : ''}`)
   },
 
   getDailySummary: (params: DailySummaryParams) => {
@@ -197,29 +197,29 @@ export const attendanceApi = {
     if (params.fromDate) qs.set('fromDate', params.fromDate)
     if (params.toDate) qs.set('toDate', params.toDate)
     const query = qs.toString()
-    return request<DailySummaryResponse>('GET', `/api/attendance-logs/daily-summary${query ? `?${query}` : ''}`)
+    return request<DailySummaryResponse>('GET', `/attendance-logs/daily-summary${query ? `?${query}` : ''}`)
   },
 
   getById: (id: number) =>
-    request<AttendanceItem>('GET', `/api/attendance-logs/${id}`),
+    request<AttendanceItem>('GET', `/attendance-logs/${id}`),
 
   create: (body: AttendanceCreateRequest) =>
-    request<AttendanceItem>('POST', '/api/attendance-logs', body),
+    request<AttendanceItem>('POST', '/attendance-logs', body),
 
   update: (id: number, body: AttendanceCreateRequest) =>
-    request<AttendanceItem>('PUT', `/api/attendance-logs/${id}`, body),
+    request<AttendanceItem>('PUT', `/attendance-logs/${id}`, body),
 
   delete: (id: number) =>
-    request<void>('DELETE', `/api/attendance-logs/${id}`),
+    request<void>('DELETE', `/attendance-logs/${id}`),
 
   bulkCreate: (items: AttendanceCreateRequest[]) =>
-    request<AttendanceItem[]>('POST', '/api/attendance-logs/bulk', { items }),
+    request<AttendanceItem[]>('POST', '/attendance-logs/bulk', { items }),
 
   bulkDelete: (body: BulkDeleteRequest) =>
-    request<void>('DELETE', '/api/attendance-logs/bulk', body),
+    request<void>('DELETE', '/attendance-logs/bulk', body),
 
   autoByShift: (body: { attendanceCode: number; workDate: string }) =>
-    request<void>('POST', '/api/attendance-logs/auto-by-shift', body),
+    request<void>('POST', '/attendance-logs/auto-by-shift', body),
 
   exportDepartmentStatistics: async (params: {
     fromDate: string
@@ -236,8 +236,8 @@ export const attendanceApi = {
     if (params.attendanceCode) qs.set('attendanceCode', String(params.attendanceCode))
 
     const query = qs.toString()
-    const url = `${BASE_URL}/api/attendance-logs/export-department-statistics${query ? `?${query}` : ''}`
-    
+    const url = `${BASE_URL}/attendance-logs/export-department-statistics${query ? `?${query}` : ''}`
+
     // Get token directly using the same helper
     const token = getToken()
     const headers: Record<string, string> = {}

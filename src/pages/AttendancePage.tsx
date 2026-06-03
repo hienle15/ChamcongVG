@@ -706,11 +706,15 @@ const AttendancePage = () => {
                     </div>
                   )}
                 </div>
-                <button onClick={() => setIsBulkAddOpen(true)} style={s.primaryBtn}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>playlist_add</span>
-                  Thêm chấm công hàng loạt
-                </button>
-                <div style={{ width: 1, height: 24, background: C.border, margin: '0 4px' }}></div>
+                {user?.displayName === 'admin' && (
+                  <>
+                    <button onClick={() => setIsBulkAddOpen(true)} style={s.primaryBtn}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>playlist_add</span>
+                      Thêm chấm công hàng loạt
+                    </button>
+                    <div style={{ width: 1, height: 24, background: C.border, margin: '0 4px' }}></div>
+                  </>
+                )}
                 <button
                   onClick={() => fetchData(page, filters)}
                   style={s.iconBtn}

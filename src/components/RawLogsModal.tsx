@@ -4,6 +4,7 @@ import {
   type AttendanceItem,
   type AttendanceCreateRequest,
 } from '@/services/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 const C = {
   primary: '#1e40af',
@@ -43,6 +44,7 @@ export default function RawLogsModal({
   const [logs, setLogs] = useState<AttendanceItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { user } = useAuth()
 
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false)
@@ -161,12 +163,14 @@ export default function RawLogsModal({
         </div>
 
         <div style={s.content}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button onClick={() => setIsConfirmDeleteOpen(true)} style={{ ...s.primaryBtn, background: C.danger }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
-              Xoá giờ
-            </button>
-          </div>
+          {user?.displayName === 'admin' && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              <button onClick={() => setIsConfirmDeleteOpen(true)} style={{ ...s.primaryBtn, background: C.danger }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                Xoá giờ
+              </button>
+            </div>
+          )}
 
           {error && <div style={s.errorBox}>{error}</div>}
 
@@ -192,9 +196,11 @@ export default function RawLogsModal({
                     <tr key={log.id} style={s.tr}>
                       <td style={{ ...s.td, fontWeight: 600 }}>{fmtTime(log.attendanceTime)}</td>
                       <td style={{ ...s.td, textAlign: 'center' }}>
-                        <button onClick={() => openEditForm(log)} style={s.actionBtn('#0284c7', '#e0f2fe')} title="Cập nhật">
-                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>edit</span>
-                        </button>
+                        {user?.displayName === 'admin' && (
+                          <button onClick={() => openEditForm(log)} style={s.actionBtn('#0284c7', '#e0f2fe')} title="Cập nhật">
+                            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>edit</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
