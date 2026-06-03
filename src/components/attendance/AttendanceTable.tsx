@@ -151,11 +151,11 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     gap: 8,
                     fontFamily: 'Inter, sans-serif'
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#f0fdf4'}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'none'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#16a34a' }}>calendar_month</span>
-                  Xuất Excel theo tháng (mẫu chấm công)
+                  <span className="material-symbols-outlined" style={{ fontSize: 16, color: C.textSub }}>calendar_month</span>
+                  Xuất Excel theo tháng
                 </button>
               </div>
             )}
