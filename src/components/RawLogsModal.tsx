@@ -179,29 +179,31 @@ export default function RawLogsModal({
               <thead>
                 <tr>
                   <th style={s.th}>Thời gian</th>
-                  <th style={{ ...s.th, width: 80, textAlign: 'center' }}>Thao tác</th>
+                  {user?.displayName === 'admin' && (
+                    <th style={{ ...s.th, width: 80, textAlign: 'center' }}>Thao tác</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={2} style={s.emptyCell}>Đang tải...</td>
+                    <td colSpan={user?.displayName === 'admin' ? 2 : 1} style={s.emptyCell}>Đang tải...</td>
                   </tr>
                 ) : logs.length === 0 ? (
                   <tr>
-                    <td colSpan={2} style={s.emptyCell}>Không có dữ liệu chi tiết</td>
+                    <td colSpan={user?.displayName === 'admin' ? 2 : 1} style={s.emptyCell}>Không có dữ liệu chi tiết</td>
                   </tr>
                 ) : (
                   logs.map((log) => (
                     <tr key={log.id} style={s.tr}>
                       <td style={{ ...s.td, fontWeight: 600 }}>{fmtTime(log.attendanceTime)}</td>
-                      <td style={{ ...s.td, textAlign: 'center' }}>
-                        {user?.displayName === 'admin' && (
+                      {user?.displayName === 'admin' && (
+                        <td style={{ ...s.td, textAlign: 'center' }}>
                           <button onClick={() => openEditForm(log)} style={s.actionBtn('#0284c7', '#e0f2fe')} title="Cập nhật">
                             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>edit</span>
                           </button>
-                        )}
-                      </td>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
