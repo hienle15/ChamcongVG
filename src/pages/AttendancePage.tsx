@@ -14,6 +14,7 @@ import {
   type DepartmentItem,
   type AreaInfo,
   type EmployeeLookupItem,
+  type EmployeeInfo,
 } from '@/services/api'
 
 import RawLogsModal from '@/components/RawLogsModal'
@@ -136,18 +137,22 @@ const AttendancePage = () => {
   }
 
   const handleSelectDept = (code: string) => {
-    const newCode = selectedDeptCode === code ? '' : code
-    setSelectedDeptCode(newCode)
-    const f: DailySummaryParams = {
-      fromDate: filters.fromDate,
-      toDate: filters.toDate,
-      ...(filters.employeeCode ? { employeeCode: filters.employeeCode } : {}),
-      ...(newCode ? { departmentCode: newCode } : {}),
-    }
-    setFilterDraft(prev => ({ ...prev, departmentCode: newCode }))
-    setFilters(f)
-    setPage(1)
+    setSelectedExportDepts(prev => {
+      const isChecked = prev.includes(code)
+      const next = isChecked ? prev.filter(c => c !== code) : [...prev, code]
+      return next
+    })
   }
+
+  useEffect(() => {
+    const newDeptCode = selectedExportDepts.join(',')
+    setFilterDraft(prev => ({ ...prev, departmentCode: newDeptCode }))
+    setFilters(prev => ({
+      ...prev,
+      departmentCode: newDeptCode || undefined
+    }))
+    setPage(1)
+  }, [selectedExportDepts])
 
   const showToast = (msg: string, type: 'ok' | 'err' = 'ok') => {
     if (type === 'ok') toast.success(msg)
@@ -216,7 +221,7 @@ const AttendancePage = () => {
       showToast('Đang tải dữ liệu...', 'ok')
 
       let allRows: DailySummaryItem[] = []
-      
+
       if (selectedExportDepts.length > 0) {
         for (const deptCode of selectedExportDepts) {
           const queryParams: DailySummaryParams = {
@@ -256,8 +261,20 @@ const AttendancePage = () => {
         }
       }
 
-      if (allRows.length === 0) {
-        showToast('Không có dữ liệu trong tháng này!', 'err')
+      // Fetch all employees belonging to the selected departments
+      let employeeList: EmployeeInfo[] = []
+      try {
+        const deptCodesToFetch = selectedExportDepts.length > 0 
+          ? selectedExportDepts 
+          : (filterDraft.departmentCode ? filterDraft.departmentCode.split(',') : departments.map(d => d.departmentCode))
+          
+        employeeList = await lookupApi.getEmployeesByDepartment({ departmentCodes: deptCodesToFetch })
+      } catch (err) {
+        console.error('Error fetching employees by department:', err)
+      }
+
+      if (allRows.length === 0 && employeeList.length === 0) {
+        showToast('Không có dữ liệu nhân sự và chấm công trong tháng này!', 'err')
         setIsExportingMonthly(false)
         return
       }
@@ -286,8 +303,36 @@ const AttendancePage = () => {
       })
 
       // Gather employee info
-      const empInfoMap = new Map<string, DailySummaryItem>()
+      const empInfoMap = new Map<string, any>()
       allRows.forEach(r => { if (!empInfoMap.has(r.employeeCode)) empInfoMap.set(r.employeeCode, r) })
+
+      // Merge with employeeList to include employees with no logs
+      if (Array.isArray(employeeList)) {
+        employeeList.forEach(emp => {
+          const dept = emp.departmentCode || ''
+          const code = emp.employeeCode || ''
+          
+          if (!deptMap.has(dept)) {
+            deptMap.set(dept, new Map())
+          }
+          const empMap = deptMap.get(dept)!
+          if (!empMap.has(code)) {
+            empMap.set(code, new Map())
+          }
+          
+          if (!empInfoMap.has(code)) {
+            empInfoMap.set(code, {
+              employeeCode: code,
+              employeeName: emp.fullName,
+              departmentCode: dept,
+              attendanceCode: emp.attendanceCode,
+              workDate: emp.startDate || '',
+              workHours: 0,
+              cccd: (emp as any).cccd || (emp as any).cardNo || ''
+            })
+          }
+        })
+      }
 
       const workbook = new ExcelJS.Workbook()
 
@@ -629,118 +674,149 @@ const AttendancePage = () => {
       return
     }
 
-    const workbook = new ExcelJS.Workbook()
-    const worksheet = workbook.addWorksheet('BangChamCong')
+    try {
+      showToast('Đang tải dữ liệu để xuất...', 'ok')
 
-    // 1. Tiêu đề chính
-    worksheet.mergeCells('A1:I1')
-    const titleCell = worksheet.getCell('A1')
-    titleCell.value = 'BẢNG TỔNG HỢP CHẤM CÔNG'
-    titleCell.font = { name: 'Cambria', size: 18, bold: true, color: { argb: 'FFC06252' } }
-    titleCell.alignment = { vertical: 'middle', horizontal: 'center' }
-    worksheet.getRow(1).height = 40
-
-    // 2. Tiêu đề thời gian
-    worksheet.mergeCells('A2:I2')
-    const dateCell = worksheet.getCell('A2')
-    dateCell.value = `Từ ngày: ${fmtDate(filterDraft.fromDate)}  -  Đến ngày: ${fmtDate(filterDraft.toDate)}`
-    dateCell.font = { name: 'Cambria', size: 12, italic: true, color: { argb: 'FF555555' } }
-    dateCell.alignment = { vertical: 'middle', horizontal: 'center' }
-    worksheet.getRow(2).height = 25
-
-    worksheet.addRow([]) // Dòng trống
-
-    // 3. Thiết lập độ rộng cột
-    worksheet.getColumn(1).width = 8
-    worksheet.getColumn(2).width = 15
-    worksheet.getColumn(3).width = 25
-    worksheet.getColumn(4).width = 20
-    worksheet.getColumn(5).width = 15
-    worksheet.getColumn(6).width = 10
-    worksheet.getColumn(7).width = 15
-    worksheet.getColumn(8).width = 15
-    worksheet.getColumn(9).width = 15
-    worksheet.getColumn(10).width = 12
-
-    // 4. Header (Dòng 4)
-    const headerRow = worksheet.addRow([
-      'STT', 'Mã NV', 'Tên nhân viên', 'Phòng ban', 'Ngày', 'Thứ', 'Ca', 'Giờ vào', 'Giờ ra', 'Giờ làm'
-    ])
-    headerRow.height = 30
-    headerRow.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFC06252' },
+      const queryParams: DailySummaryParams = {
+        page: 1,
+        pageSize: 1000,
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        ...(filters.departmentCode ? { departmentCode: filters.departmentCode } : {}),
+        ...(filters.employeeCode ? { employeeCode: filters.employeeCode } : {})
       }
-      cell.font = {
-        name: 'Cambria',
-        color: { argb: 'FFFFFFFF' },
-        bold: true,
-        size: 11
-      }
-      cell.alignment = { vertical: 'middle', horizontal: 'center' }
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFC06252' } },
-        left: { style: 'thin', color: { argb: 'FFFFFFFF' } },
-        bottom: { style: 'thin', color: { argb: 'FFC06252' } },
-        right: { style: 'thin', color: { argb: 'FFFFFFFF' } }
-      }
-    })
 
-    // 5. Thêm dữ liệu
-    rows.forEach((row, idx) => {
-      const addedRow = worksheet.addRow([
-        (page - 1) * pageSize + idx + 1,
-        row.employeeCode,
-        row.employeeName,
-        departments.find((d) => d.departmentCode === row.departmentCode)?.departmentName || row.departmentCode || '',
-        fmtDate(row.workDate),
-        row.weekDayName || '',
-        row.shiftName || row.shiftCode || '',
-        fmtTimeOnly(row.rawCheckIn) !== '—' ? fmtTimeOnly(row.rawCheckIn) : '',
-        fmtTimeOnly(row.displayCheckOut) !== '—' ? fmtTimeOnly(row.displayCheckOut) : '',
-        row.workHours > 0 ? `${row.workHours}h` : '',
+      const firstPage = await attendanceApi.getDailySummary(queryParams)
+      let allRows = firstPage.items ?? []
+      if (firstPage.totalPages > 1) {
+        for (let p = 2; p <= firstPage.totalPages; p++) {
+          const res = await attendanceApi.getDailySummary({ ...queryParams, page: p })
+          allRows = allRows.concat(res.items ?? [])
+        }
+      }
+
+      if (allRows.length === 0) {
+        showToast('Không có dữ liệu để xuất!', 'err')
+        return
+      }
+
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('BangChamCong')
+
+      // 1. Tiêu đề chính
+      worksheet.mergeCells('A1:J1')
+      const titleCell = worksheet.getCell('A1')
+      titleCell.value = 'BẢNG TỔNG HỢP CHẤM CÔNG'
+      titleCell.font = { name: 'Cambria', size: 18, bold: true, color: { argb: 'FFC06252' } }
+      titleCell.alignment = { vertical: 'middle', horizontal: 'center' }
+      worksheet.getRow(1).height = 40
+
+      // 2. Tiêu đề thời gian
+      worksheet.mergeCells('A2:J2')
+      const dateCell = worksheet.getCell('A2')
+      dateCell.value = `Từ ngày: ${fmtDate(filters.fromDate)}  -  Đến ngày: ${fmtDate(filters.toDate)}`
+      dateCell.font = { name: 'Cambria', size: 12, italic: true, color: { argb: 'FF555555' } }
+      dateCell.alignment = { vertical: 'middle', horizontal: 'center' }
+      worksheet.getRow(2).height = 25
+
+      worksheet.addRow([]) // Dòng trống
+
+      // 3. Thiết lập độ rộng cột
+      worksheet.getColumn(1).width = 8
+      worksheet.getColumn(2).width = 15
+      worksheet.getColumn(3).width = 25
+      worksheet.getColumn(4).width = 20
+      worksheet.getColumn(5).width = 15
+      worksheet.getColumn(6).width = 10
+      worksheet.getColumn(7).width = 15
+      worksheet.getColumn(8).width = 15
+      worksheet.getColumn(9).width = 15
+      worksheet.getColumn(10).width = 12
+
+      // 4. Header (Dòng 4)
+      const headerRow = worksheet.addRow([
+        'STT', 'Mã NV', 'Tên nhân viên', 'Phòng ban', 'Ngày', 'Thứ', 'Ca', 'Giờ vào', 'Giờ ra', 'Giờ làm'
       ])
-
-      addedRow.height = 24
-      const isEven = idx % 2 === 0
-
-      addedRow.eachCell((cell, colNumber) => {
-        let fontColor = 'FF1E293B' // textMain
-        let bold = false
-
-        // Giờ vào (cột 8) - màu xanh
-        if (colNumber === 8 && cell.value) fontColor = 'FF16A34A'
-        // Giờ ra (cột 9) - màu cam
-        if (colNumber === 9 && cell.value) fontColor = 'FFD97706'
-        // Giờ làm (cột 10) - màu xanh đậm, in đậm
-        if (colNumber === 10 && cell.value) {
-          fontColor = 'FF16A34A'
-          bold = true
+      headerRow.height = 30
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFC06252' },
         }
-
-        cell.font = { name: 'Cambria', color: { argb: fontColor }, bold, size: 11 }
-        cell.alignment = { vertical: 'middle', horizontal: colNumber >= 5 ? 'center' : 'left' }
-        if (colNumber === 1) cell.alignment.horizontal = 'center'
-
-        // Màu nền xen kẽ (Zebra striping)
-        if (isEven) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+        cell.font = {
+          name: 'Cambria',
+          color: { argb: 'FFFFFFFF' },
+          bold: true,
+          size: 11
         }
-
+        cell.alignment = { vertical: 'middle', horizontal: 'center' }
         cell.border = {
-          top: { style: 'thin', color: { argb: 'FFEDF2F7' } },
-          bottom: { style: 'thin', color: { argb: 'FFEDF2F7' } },
-          left: { style: 'thin', color: { argb: 'FFEDF2F7' } },
-          right: { style: 'thin', color: { argb: 'FFEDF2F7' } }
+          top: { style: 'thin', color: { argb: 'FFC06252' } },
+          left: { style: 'thin', color: { argb: 'FFFFFFFF' } },
+          bottom: { style: 'thin', color: { argb: 'FFC06252' } },
+          right: { style: 'thin', color: { argb: 'FFFFFFFF' } }
         }
       })
-    })
 
-    const buffer = await workbook.xlsx.writeBuffer()
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-    saveAs(blob, `ChamCong_${filterDraft.fromDate}_${filterDraft.toDate}.xlsx`)
+      // 5. Thêm dữ liệu
+      allRows.forEach((row, idx) => {
+        const addedRow = worksheet.addRow([
+          idx + 1,
+          row.employeeCode,
+          row.employeeName,
+          departments.find((d) => d.departmentCode === row.departmentCode)?.departmentName || row.departmentCode || '',
+          fmtDate(row.workDate),
+          row.weekDayName || '',
+          row.shiftName || row.shiftCode || '',
+          fmtTimeOnly(row.rawCheckIn) !== '—' ? fmtTimeOnly(row.rawCheckIn) : '',
+          fmtTimeOnly(row.displayCheckOut) !== '—' ? fmtTimeOnly(row.displayCheckOut) : '',
+          row.workHours > 0 ? `${row.workHours}h` : '',
+        ])
+
+        addedRow.height = 24
+        const isEven = idx % 2 === 0
+
+        addedRow.eachCell((cell, colNumber) => {
+          let fontColor = 'FF1E293B' // textMain
+          let bold = false
+
+          // Giờ vào (cột 8) - màu xanh
+          if (colNumber === 8 && cell.value) fontColor = 'FF16A34A'
+          // Giờ ra (cột 9) - màu cam
+          if (colNumber === 9 && cell.value) fontColor = 'FFD97706'
+          // Giờ làm (cột 10) - màu xanh đậm, in đậm
+          if (colNumber === 10 && cell.value) {
+            fontColor = 'FF16A34A'
+            bold = true
+          }
+
+          cell.font = { name: 'Cambria', color: { argb: fontColor }, bold, size: 11 }
+          cell.alignment = { vertical: 'middle', horizontal: colNumber >= 5 ? 'center' : 'left' }
+          if (colNumber === 1) cell.alignment.horizontal = 'center'
+
+          // Màu nền xen kẽ (Zebra striping)
+          if (isEven) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+          }
+
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFEDF2F7' } },
+            bottom: { style: 'thin', color: { argb: 'FFEDF2F7' } },
+            left: { style: 'thin', color: { argb: 'FFEDF2F7' } },
+            right: { style: 'thin', color: { argb: 'FFEDF2F7' } }
+          }
+        })
+      })
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      saveAs(blob, `ChamCong_${filters.fromDate}_${filters.toDate}.xlsx`)
+      showToast('Xuất Excel dữ liệu thô thành công!', 'ok')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error'
+      showToast('Lỗi xuất Excel: ' + msg, 'err')
+    }
   }
 
   const handleExportExcelStatistics = async () => {
@@ -1045,7 +1121,7 @@ const AttendancePage = () => {
               <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, fontWeight: 600, color: C.textSub, marginBottom: 8 }}>
                 <span>Phòng ban (có thể chọn nhiều)</span>
                 {selectedExportDepts.length > 0 && (
-                  <span 
+                  <span
                     onClick={() => setSelectedExportDepts([])}
                     style={{ fontSize: 12, color: '#3b82f6', cursor: 'pointer', fontWeight: 500 }}
                   >
@@ -1056,20 +1132,22 @@ const AttendancePage = () => {
               <div style={{
                 maxHeight: 180, overflowY: 'auto', border: `1.5px solid ${C.border}`, borderRadius: 8, padding: '4px 0', background: '#f8fafc'
               }}>
-                {departments.map(d => (
-                  <label key={d.departmentCode} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <input
-                      type="checkbox"
-                      checked={selectedExportDepts.includes(d.departmentCode)}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedExportDepts(prev => [...prev, d.departmentCode])
-                        else setSelectedExportDepts(prev => prev.filter(c => c !== d.departmentCode))
-                      }}
-                      style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#16a34a' }}
-                    />
-                    <span style={{ fontSize: 14, color: C.textMain }}>{d.departmentName}</span>
-                  </label>
-                ))}
+                {departments
+                  .filter(d => selectedExportDepts.includes(d.departmentCode))
+                  .map(d => (
+                    <label key={d.departmentCode} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <input
+                        type="checkbox"
+                        checked={selectedExportDepts.includes(d.departmentCode)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedExportDepts(prev => [...prev, d.departmentCode])
+                          else setSelectedExportDepts(prev => prev.filter(c => c !== d.departmentCode))
+                        }}
+                        style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#16a34a' }}
+                      />
+                      <span style={{ fontSize: 14, color: C.textMain }}>{d.departmentName}</span>
+                    </label>
+                  ))}
               </div>
               <div style={{ fontSize: 12, color: C.textMuted, marginTop: 6, fontStyle: 'italic' }}>
                 * Để trống nếu muốn xuất tất cả phòng ban

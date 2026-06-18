@@ -187,9 +187,34 @@ export interface EmployeeLookupItem {
   [key: string]: any
 }
 
+export interface EmployeeInfo {
+  employeeCode: string
+  attendanceCode: number
+  fullName: string
+  attendanceName?: string
+  cardNo?: string
+  departmentCode: string
+  departmentName?: string
+  areaCode?: string
+  companyCode?: string
+  positionCode?: string
+  startDate?: string
+  userEnable?: string
+  isTemporaryLeave?: boolean
+}
+
 export const lookupApi = {
   getDepartments: () => request<DepartmentItem[]>('GET', '/departments'),
   getEmployees: () => request<EmployeeLookupItem[]>('GET', '/employees/lookup'),
+  getEmployeesByDepartment: (params: { departmentCode?: string; departmentCodes?: string[] }) => {
+    const qs = new URLSearchParams()
+    if (params.departmentCode) qs.set('departmentCode', params.departmentCode)
+    if (params.departmentCodes) {
+      params.departmentCodes.forEach(code => qs.append('departmentCodes', code))
+    }
+    const query = qs.toString()
+    return request<EmployeeInfo[]>('GET', `/employees/by-department${query ? `?${query}` : ''}`)
+  },
 }
 
 export const attendanceApi = {
@@ -198,7 +223,13 @@ export const attendanceApi = {
     if (params.page !== undefined) qs.set('page', String(params.page))
     if (params.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
     if (params.employeeCode) qs.set('employeeCode', params.employeeCode)
-    if (params.departmentCode) qs.set('departmentCode', params.departmentCode)
+    if (params.departmentCode) {
+      if (params.departmentCode.includes(',')) {
+        params.departmentCode.split(',').forEach(c => qs.append('departmentCode', c))
+      } else {
+        qs.set('departmentCode', params.departmentCode)
+      }
+    }
     if (params.fromDate) qs.set('fromDate', params.fromDate)
     if (params.toDate) qs.set('toDate', params.toDate)
     if (params.checkType) qs.set('checkType', params.checkType)
@@ -211,7 +242,13 @@ export const attendanceApi = {
     if (params.page !== undefined) qs.set('page', String(params.page))
     if (params.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
     if (params.employeeCode) qs.set('employeeCode', params.employeeCode)
-    if (params.departmentCode) qs.set('departmentCode', params.departmentCode)
+    if (params.departmentCode) {
+      if (params.departmentCode.includes(',')) {
+        params.departmentCode.split(',').forEach(c => qs.append('departmentCode', c))
+      } else {
+        qs.set('departmentCode', params.departmentCode)
+      }
+    }
     if (params.attendanceCode) qs.set('attendanceCode', params.attendanceCode)
     if (params.fromDate) qs.set('fromDate', params.fromDate)
     if (params.toDate) qs.set('toDate', params.toDate)
@@ -250,7 +287,13 @@ export const attendanceApi = {
     const qs = new URLSearchParams()
     if (params.fromDate) qs.set('fromDate', params.fromDate)
     if (params.toDate) qs.set('toDate', params.toDate)
-    if (params.departmentCode) qs.set('departmentCode', params.departmentCode)
+    if (params.departmentCode) {
+      if (params.departmentCode.includes(',')) {
+        params.departmentCode.split(',').forEach(c => qs.append('departmentCode', c))
+      } else {
+        qs.set('departmentCode', params.departmentCode)
+      }
+    }
     if (params.employeeCode) qs.set('employeeCode', params.employeeCode)
     if (params.attendanceCode) qs.set('attendanceCode', String(params.attendanceCode))
 

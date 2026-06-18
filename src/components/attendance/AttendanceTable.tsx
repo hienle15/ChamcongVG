@@ -129,7 +129,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                 >
                   <span className="material-symbols-outlined" style={{ fontSize: 16, color: C.textSub }}>analytics</span>
-                  Xuất bảng công và tăng ca
+                  Xuất bảng tổng hợp  công và tăng ca
                 </button>
                 <div style={{ borderTop: `1px solid ${C.border}`, margin: '4px 0' }} />
                 <button

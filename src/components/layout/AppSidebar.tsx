@@ -131,7 +131,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
               {/* ── Area groups ── */}
               {areaTree.map((areaNode) => {
                 const isAreaExpanded = expandedAreas.has(areaNode.area.areaCode)
-                const hasActiveChild = areaNode.departments.some(d => d.departmentCode === selectedDeptCode)
+                const hasActiveChild = areaNode.departments.some(d => selectedExportDepts.includes(d.departmentCode))
 
                 // Calculate selection state for export
                 const deptCodes = areaNode.departments.map(d => d.departmentCode)
@@ -284,7 +284,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                         gap: 1,
                       }}>
                         {areaNode.departments.map(dept => {
-                          const isSelected = selectedDeptCode === dept.departmentCode
+                          const isSelected = selectedExportDepts.includes(dept.departmentCode)
                           return (
                             <div
                               key={dept.departmentCode}
