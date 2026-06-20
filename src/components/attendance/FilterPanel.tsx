@@ -1,7 +1,7 @@
 import React from 'react'
 import VGSelectSearch from '@/assets/components/ui/VGSelectSearch'
 import { C, s } from '@/styles/attendance.styles'
-import type { EmployeeLookupItem, DepartmentItem } from '@/services/api'
+import { lookupApi, type EmployeeLookupItem, type DepartmentItem } from '@/services/api'
 
 /* ─────────────────── Filter Input Component ─────────────────── */
 interface FilterInputProps {
@@ -81,10 +81,21 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
               onChange={(v) => setFilterDraft({ ...filterDraft, employeeCode: v ? String(v.value) : '' })}
               placeholder="Tất cả nhân viên"
               loadOptions={async (kw) => {
-                const lower = (kw || '').toLowerCase()
-                return employees
-                  .filter(e => (e.fullName?.toLowerCase() || '').includes(lower) || (e.employeeCode?.toLowerCase() || '').includes(lower))
-                  .map((e) => ({ label: `${e.fullName} (${e.employeeCode})`, value: e.employeeCode }))
+                try {
+                  const res = await lookupApi.getEmployees({
+                    keyword: kw,
+                    departmentCode: filterDraft.departmentCode || undefined,
+                    pageSize: 100
+                  })
+                  const list = Array.isArray(res) ? res : (res as any).items || (res as any).data || []
+                  return list.map((e: EmployeeLookupItem) => ({
+                    label: `${e.fullName} (${e.employeeCode})`,
+                    value: e.employeeCode
+                  }))
+                } catch (err) {
+                  console.error(err)
+                  return []
+                }
               }}
               getOptionByValue={(val) => {
                 const emp = employees.find(e => e.employeeCode === val)

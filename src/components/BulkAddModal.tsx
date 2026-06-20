@@ -1,6 +1,7 @@
-import React, { useState, type CSSProperties, type FormEvent } from 'react'
+import React, { useState, useCallback, type CSSProperties, type FormEvent } from 'react'
 import {
   attendanceApi,
+  lookupApi,
   type EmployeeLookupItem,
   type AttendanceCreateRequest,
 } from '@/services/api'
@@ -46,6 +47,15 @@ export default function BulkAddModal({ employees, onClose, onSuccess }: BulkAddM
   const [rows, setRows] = useState<RowData[]>([createEmptyRow()])
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  // Cache fetched employees to resolve attendanceCode and names correctly
+  const [employeeMap, setEmployeeMap] = useState<Record<string, EmployeeLookupItem>>(() => {
+    const map: Record<string, EmployeeLookupItem> = {}
+    employees.forEach(e => {
+      map[e.employeeCode] = e
+    })
+    return map
+  })
 
   const handleAddRow = () => {
     setRows([...rows, createEmptyRow()])
@@ -62,7 +72,7 @@ export default function BulkAddModal({ employees, onClose, onSuccess }: BulkAddM
       if (r.id === id) {
         const updated = { ...r, [field]: value }
         if (field === 'employeeCode') {
-          const emp = employees.find(e => e.employeeCode === value)
+          const emp = employeeMap[value]
           updated.attendanceCode = emp?.attendanceCode
         }
         return updated
@@ -70,6 +80,33 @@ export default function BulkAddModal({ employees, onClose, onSuccess }: BulkAddM
       return r
     }))
   }
+
+  const handleLoadOptions = useCallback(async (kw: string) => {
+    try {
+      const res = await lookupApi.getEmployees({
+        keyword: kw,
+        pageSize: 100
+      })
+      const list = Array.isArray(res) ? res : (res as any).items || (res as any).data || []
+      
+      // Merge into local cache map
+      setEmployeeMap(prev => {
+        const next = { ...prev }
+        list.forEach((e: EmployeeLookupItem) => {
+          next[e.employeeCode] = e
+        })
+        return next
+      })
+
+      return list.map((e: EmployeeLookupItem) => ({
+        label: `${e.fullName} (${e.employeeCode})`,
+        value: e.employeeCode
+      }))
+    } catch (err) {
+      console.error(err)
+      return []
+    }
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -134,14 +171,9 @@ export default function BulkAddModal({ employees, onClose, onSuccess }: BulkAddM
                         value={row.employeeCode}
                         onChange={(v) => handleChange(row.id, 'employeeCode', v ? String(v.value) : '')}
                         placeholder="Chọn nhân viên..."
-                        loadOptions={async (kw) => {
-                          const lower = (kw || '').toLowerCase()
-                          return employees
-                            .filter(e => (e.fullName?.toLowerCase() || '').includes(lower) || (e.employeeCode?.toLowerCase() || '').includes(lower))
-                            .map(e => ({ label: `${e.fullName} (${e.employeeCode})`, value: e.employeeCode }))
-                        }}
+                        loadOptions={handleLoadOptions}
                         getOptionByValue={(val) => {
-                          const emp = employees.find(e => e.employeeCode === val)
+                          const emp = employeeMap[val]
                           return emp ? { label: `${emp.fullName} (${emp.employeeCode})`, value: emp.employeeCode } : null
                         }}
                       />

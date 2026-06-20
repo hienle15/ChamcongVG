@@ -2,7 +2,7 @@
    api.ts  –  Centralized API service for ChamcongVG
    All calls go through this module. Token is read from localStorage.
 ───────────────────────────────────────────────────────────────────────── */
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://172.23.13.54:8080'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 /* ── Token helpers ── */
 export const getToken = (): string | null => localStorage.getItem('accessToken')
@@ -205,7 +205,20 @@ export interface EmployeeInfo {
 
 export const lookupApi = {
   getDepartments: () => request<DepartmentItem[]>('GET', '/departments'),
-  getEmployees: () => request<EmployeeLookupItem[]>('GET', '/employees/lookup'),
+  getEmployees: (params?: { keyword?: string; departmentCode?: string; pageSize?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.keyword) qs.set('keyword', params.keyword)
+    if (params?.departmentCode) {
+      if (params.departmentCode.includes(',')) {
+        params.departmentCode.split(',').forEach(c => qs.append('departmentCode', c))
+      } else {
+        qs.set('departmentCode', params.departmentCode)
+      }
+    }
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize))
+    const query = qs.toString()
+    return request<EmployeeLookupItem[]>('GET', `/employees/lookup${query ? `?${query}` : ''}`)
+  },
   getEmployeesByDepartment: (params: { departmentCode?: string; departmentCodes?: string[] }) => {
     const qs = new URLSearchParams()
     if (params.departmentCode) qs.set('departmentCode', params.departmentCode)
