@@ -234,7 +234,8 @@ const AttendancePage = () => {
             pageSize: 500,
             fromDate,
             toDate,
-            departmentCode: deptCode
+            departmentCode: deptCode,
+            ...(filterDraft.employeeCode ? { employeeCode: filterDraft.employeeCode } : {})
           }
           const firstPage = await attendanceApi.getDailySummary(queryParams)
           let deptRows = firstPage.items ?? []
@@ -279,6 +280,10 @@ const AttendancePage = () => {
         }
       } catch (err) {
         console.error('Error fetching employees by department:', err)
+      }
+
+      if (filterDraft.employeeCode) {
+        allRows = allRows.filter(r => r.employeeCode === filterDraft.employeeCode)
       }
 
       if (allRows.length === 0 && employeeList.length === 0) {
