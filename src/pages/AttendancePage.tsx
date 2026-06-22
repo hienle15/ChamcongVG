@@ -199,10 +199,15 @@ const AttendancePage = () => {
   }
 
   const clearFilters = () => {
-    const defaultFrom = new Date(new Date().setDate(1)).toISOString().slice(0, 10)
-    const defaultTo = new Date().toISOString().slice(0, 10)
-    setFilterDraft({ employeeCode: '', departmentCode: '', fromDate: defaultFrom, toDate: defaultTo })
-    setFilters({ fromDate: defaultFrom, toDate: defaultTo })
+    setSelectedExportDepts([])
+    setFilterDraft(prev => ({
+      ...prev,
+      employeeCode: '',
+    }))
+    setFilters(prev => ({
+      fromDate: prev.fromDate,
+      toDate: prev.toDate,
+    }))
     setPage(1)
   }
 
@@ -264,11 +269,14 @@ const AttendancePage = () => {
       // Fetch all employees belonging to the selected departments
       let employeeList: EmployeeInfo[] = []
       try {
-        const deptCodesToFetch = selectedExportDepts.length > 0 
-          ? selectedExportDepts 
+        const deptCodesToFetch = selectedExportDepts.length > 0
+          ? selectedExportDepts
           : (filterDraft.departmentCode ? filterDraft.departmentCode.split(',') : departments.map(d => d.departmentCode))
-          
+
         employeeList = await lookupApi.getEmployeesByDepartment({ departmentCodes: deptCodesToFetch })
+        if (filterDraft.employeeCode) {
+          employeeList = employeeList.filter(emp => emp.employeeCode === filterDraft.employeeCode)
+        }
       } catch (err) {
         console.error('Error fetching employees by department:', err)
       }
@@ -311,7 +319,7 @@ const AttendancePage = () => {
         employeeList.forEach(emp => {
           const dept = emp.departmentCode || ''
           const code = emp.employeeCode || ''
-          
+
           if (!deptMap.has(dept)) {
             deptMap.set(dept, new Map())
           }
@@ -319,7 +327,7 @@ const AttendancePage = () => {
           if (!empMap.has(code)) {
             empMap.set(code, new Map())
           }
-          
+
           if (!empInfoMap.has(code)) {
             empInfoMap.set(code, {
               employeeCode: code,
@@ -378,7 +386,7 @@ const AttendancePage = () => {
       ws.getColumn(4).width = 22  // Họ và tên
       ws.getColumn(5).width = 11  // Ngày vào làm
       for (let d = 1; d <= daysInMonth; d++) {
-        ws.getColumn(dayStartCol + d - 1).width = 4
+        ws.getColumn(dayStartCol + d - 1).width = 5
       }
       ws.getColumn(colCongChinh).width = 8
       ws.getColumn(colTongCongChinh).width = 9
@@ -508,7 +516,11 @@ const AttendancePage = () => {
               cuaT++
               if (rec.workHours > 8) tangCaCuaT += rec.workHours - 8
             } else {
-              if (rec.workHours > 0) tongCong++
+              if (rec.workHours > 6) {
+                tongCong += 1
+              } else if (rec.workHours >= 3) {
+                tongCong += 0.5
+              }
               if (rec.workHours > 8) {
                 const ot = rec.workHours - 8
                 tangCa += ot
@@ -556,8 +568,31 @@ const AttendancePage = () => {
               cell.font = { ...dataFont, color: { argb: 'FFC00000' }, bold: true }
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND_LIGHT } }
             } else {
-              cell.value = rec && rec.workHours > 0 ? 1 : (rec ? '' : '')
+              let cellVal: any = ''
+              if (rec) {
+                const hasIn = !!rec.rawCheckIn
+                const hasOut = !!(rec.rawCheckOut || rec.displayCheckOut)
+                const isSingleSwipe = (hasIn && !hasOut) || (!hasIn && hasOut) || (hasIn && hasOut && rec.rawCheckIn === (rec.rawCheckOut || rec.displayCheckOut))
+
+                if (!hasIn && !hasOut) {
+                  cellVal = ''
+                } else if (isSingleSwipe) {
+                  cellVal = 'x'
+                } else {
+                  if (rec.workHours > 6) {
+                    cellVal = 1
+                  } else if (rec.workHours >= 3) {
+                    cellVal = 0.5
+                  } else {
+                    cellVal = 0
+                  }
+                }
+              }
+              cell.value = cellVal
               cell.font = dataFont
+              if (cellVal === 'x') {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }
+              }
             }
             cell.alignment = centerAlign()
             cell.border = allBorders()
@@ -571,17 +606,25 @@ const AttendancePage = () => {
           setCell(colGhiChu, '')
           currentRow++
 
-          // Overtime sub-row (only if there are overtime entries)
-          if (overtimeDayMap.size > 0 || tangCaCuaT > 0) {
+          // Overtime sub-row (always rendered)
+          {
             const otRow = ws.getRow(currentRow)
             otRow.height = 16
             // Empty static cols
-            for (const col of [1, 2, 3, 4, 5]) {
+            for (const col of [1, 2, 3, 5]) {
               const cell = ws.getCell(currentRow, col)
               cell.value = ''
               cell.border = allBorders()
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
             }
+            // Name cell showing "- Tăng ca"
+            const otNameCell = ws.getCell(currentRow, 4)
+            otNameCell.value = '- Tăng ca'
+            otNameCell.font = { ...dataFont, italic: true, size: 10, color: { argb: 'FF555555' } }
+            otNameCell.alignment = leftAlign()
+            otNameCell.border = allBorders()
+            otNameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+
             for (let d = 1; d <= daysInMonth; d++) {
               const col = dayStartCol + d - 1
               const cell = ws.getCell(currentRow, col)
@@ -593,24 +636,12 @@ const AttendancePage = () => {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
             }
             // Summary cols for OT row
-            for (const col of [colCongChinh, colTongCongChinh, colChuNhat]) {
+            for (const col of [colCongChinh, colTongCongChinh, colTangCa, colChuNhat, colTangCaChuNhat]) {
               const cell = ws.getCell(currentRow, col)
               cell.value = ''
               cell.border = allBorders()
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
             }
-            const otTotalCell = ws.getCell(currentRow, colTangCa)
-            otTotalCell.value = tangCa > 0 ? tangCa : ''
-            otTotalCell.font = { ...dataFont, color: { argb: 'FF16A34A' }, bold: true }
-            otTotalCell.alignment = centerAlign()
-            otTotalCell.border = allBorders()
-            otTotalCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
-            const otCuaTCell = ws.getCell(currentRow, colTangCaChuNhat)
-            otCuaTCell.value = tangCaCuaT > 0 ? tangCaCuaT : ''
-            otCuaTCell.font = { ...dataFont, color: { argb: 'FFC00000' }, bold: true }
-            otCuaTCell.alignment = centerAlign()
-            otCuaTCell.border = allBorders()
-            otCuaTCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
             ws.getCell(currentRow, colGhiChu).value = ''
             ws.getCell(currentRow, colGhiChu).border = allBorders()
             ws.getCell(currentRow, colGhiChu).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
