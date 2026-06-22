@@ -595,7 +595,7 @@ const AttendancePage = () => {
               }
               cell.value = cellVal
               cell.font = dataFont
-              if (cellVal === 'x') {
+              if (cellVal === 'x' || cellVal === 0) {
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }
               }
             }
