@@ -225,7 +225,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     <td style={s.td}>{fmtDate(row.workDate)}</td>
                     <td style={{ ...s.td, fontSize: 13 }}>{row.weekDayName || '—'}</td>
                     <td style={s.td}>{row.shiftName || row.shiftCode || '—'}</td>
-                    <td style={{ ...s.td, fontWeight: 600, color: C.success }}>{fmtTimeOnly(row.rawCheckIn)}</td>
+                    <td style={{ ...s.td, fontWeight: 600, color: C.success }}>{fmtTimeOnly(row.checkIn)}</td>
                     <td style={{ ...s.td, fontWeight: 600, color: C.warning }}>{fmtTimeOnly(row.displayCheckOut)}</td>
                     <td style={{ ...s.td, fontWeight: 700, color: C.textMain }}>{row.workHours > 0 ? <span style={{ color: C.success }}>{row.workHours}h</span> : '—'}</td>
                     <td style={s.td}>

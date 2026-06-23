@@ -575,9 +575,9 @@ const AttendancePage = () => {
             } else {
               let cellVal: any = ''
               if (rec) {
-                const hasIn = !!rec.rawCheckIn
+                const hasIn = !!rec.checkIn
                 const hasOut = !!(rec.rawCheckOut || rec.displayCheckOut)
-                const isSingleSwipe = (hasIn && !hasOut) || (!hasIn && hasOut) || (hasIn && hasOut && rec.rawCheckIn === (rec.rawCheckOut || rec.displayCheckOut))
+                const isSingleSwipe = (hasIn && !hasOut) || (!hasIn && hasOut) || (hasIn && hasOut && rec.checkIn === (rec.rawCheckOut || rec.displayCheckOut))
 
                 if (!hasIn && !hasOut) {
                   cellVal = ''
@@ -805,7 +805,7 @@ const AttendancePage = () => {
           fmtDate(row.workDate),
           row.weekDayName || '',
           row.shiftName || row.shiftCode || '',
-          fmtTimeOnly(row.rawCheckIn) !== '—' ? fmtTimeOnly(row.rawCheckIn) : '',
+          fmtTimeOnly(row.checkIn) !== '—' ? fmtTimeOnly(row.checkIn) : '',
           fmtTimeOnly(row.displayCheckOut) !== '—' ? fmtTimeOnly(row.displayCheckOut) : '',
           row.workHours > 0 ? `${row.workHours}h` : '',
         ])
